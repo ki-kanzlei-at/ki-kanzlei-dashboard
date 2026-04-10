@@ -78,13 +78,21 @@ export async function getLeads(
     query = query.eq("status", filters.status);
   }
   if (filters.city) {
-    query = query.ilike("city", `%${filters.city}%`);
+    if (Array.isArray(filters.city)) {
+      query = query.in("city", filters.city);
+    } else {
+      query = query.eq("city", filters.city);
+    }
   }
   if (filters.category) {
     query = query.ilike("category", `%${filters.category}%`);
   }
   if (filters.industry) {
-    query = query.ilike("industry", `%${filters.industry}%`);
+    if (Array.isArray(filters.industry)) {
+      query = query.in("industry", filters.industry);
+    } else {
+      query = query.eq("industry", filters.industry);
+    }
   }
   if (filters.search_query) {
     query = query.eq("search_query", filters.search_query);
@@ -93,7 +101,15 @@ export async function getLeads(
     query = query.eq("search_location", filters.search_location);
   }
   if (filters.legal_form) {
-    query = query.eq("legal_form", filters.legal_form);
+    if (Array.isArray(filters.legal_form)) {
+      // OR-Verknüpfung: .in() nicht möglich bei ilike, daher or()
+      const orClause = filters.legal_form
+        .map((lf) => `legal_form.ilike.%${lf}%`)
+        .join(",");
+      query = query.or(orClause);
+    } else {
+      query = query.ilike("legal_form", `%${filters.legal_form}%`);
+    }
   }
   if (filters.country) {
     query = query.eq("country", filters.country);
@@ -376,12 +392,13 @@ export async function getLeadStats(): Promise<LeadStats> {
 /**
  * Distinct industries aus der DB holen (nur nicht-leere Werte).
  */
-export async function getDistinctIndustries(): Promise<string[]> {
+export async function getDistinctIndustries(status?: string): Promise<string[]> {
   const supabase = await createClient();
 
-  const { data, error } = await supabase
-    .from("leads")
-    .select("industry");
+  let query = supabase.from("leads").select("industry");
+  if (status) query = query.eq("status", status);
+
+  const { data, error } = await query;
 
   if (error) {
     throw new Error(`Fehler beim Laden der Branchen: ${error.message}`);
@@ -398,12 +415,13 @@ export async function getDistinctIndustries(): Promise<string[]> {
 /**
  * Distinct cities aus der DB holen (nur nicht-leere Werte).
  */
-export async function getDistinctCities(): Promise<string[]> {
+export async function getDistinctCities(country?: string): Promise<string[]> {
   const supabase = await createClient();
 
-  const { data, error } = await supabase
-    .from("leads")
-    .select("city");
+  let query = supabase.from("leads").select("city");
+  if (country) query = query.eq("country", country);
+
+  const { data, error } = await query;
 
   if (error) {
     throw new Error(`Fehler beim Laden der Städte: ${error.message}`);

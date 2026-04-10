@@ -1,11 +1,11 @@
 /* ── API Route: POST /api/campaigns/[id]/trigger ──
- * Löst den n8n Webhook aus, um die Kampagne zu starten.
+ * Setzt die Kampagne auf "active" — der Cron Job übernimmt den Versand.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCampaignById, updateCampaign } from "@/lib/supabase/campaigns";
-import { getUserSettings } from "@/lib/supabase/settings";
+import { getEmailAccounts } from "@/lib/supabase/email-accounts";
 
 export async function POST(
   _request: NextRequest,
@@ -31,34 +31,17 @@ export async function POST(
       );
     }
 
-    const settings = await getUserSettings(user.id);
-    const webhookUrl = settings?.n8n_webhook_url || process.env.N8N_WEBHOOK_URL;
-    if (!webhookUrl) {
+    // Prüfen ob aktive E-Mail-Konten vorhanden sind
+    const accounts = await getEmailAccounts(user.id);
+    const activeAccounts = accounts.filter((a) => a.is_active);
+    if (activeAccounts.length === 0) {
       return NextResponse.json(
-        { error: "n8n Webhook URL nicht konfiguriert. Bitte unter Einstellungen eintragen." },
+        { error: "Keine aktiven E-Mail-Konten konfiguriert. Bitte unter Einstellungen → Kampagnen mindestens ein Konto anlegen." },
         { status: 400 },
       );
     }
 
-    // n8n Webhook triggern
-    const webhookRes = await fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        campaign_id: campaign.id,
-        user_id: user.id,
-      }),
-    });
-
-    if (!webhookRes.ok) {
-      const errorText = await webhookRes.text().catch(() => "Unbekannter Fehler");
-      return NextResponse.json(
-        { error: `n8n Webhook fehlgeschlagen: ${errorText}` },
-        { status: 502 },
-      );
-    }
-
-    // Status auf active setzen + etwaige Fehlermeldung zurücksetzen
+    // Status auf active setzen — Cron Job übernimmt den Versand
     const updated = await updateCampaign(id, { status: "active", error_message: null }, user.id);
 
     return NextResponse.json({ data: updated });

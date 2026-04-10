@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import Image from "next/image";
 import {
-  Save, Webhook, Sparkles, EyeIcon, EyeOffIcon, CheckCircle2,
+  Save, Sparkles, EyeIcon, EyeOffIcon, CheckCircle2,
   Loader2, Globe, ExternalLink, Settings2,
   Zap, XCircle, Linkedin, Check, X, Search,
 } from "lucide-react";
@@ -32,6 +32,9 @@ import {
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import type { CrmProvider } from "@/lib/crm/types";
+import EmailAccountsManager from "@/components/settings/EmailAccountsManager";
+import BrandingSettings from "@/components/settings/BrandingSettings";
+import SocialMediaAccountsManager from "@/components/settings/SocialMediaAccountsManager";
 
 /* ── Sanitization ── */
 function sanitize(v: string): string {
@@ -49,7 +52,8 @@ const MU = 2048;
 /* ── Types ── */
 interface SenderProfile { name?: string; position?: string; company?: string; specialization?: string; tone?: string; }
 interface Settings {
-  n8n_webhook_url: string | null; gemini_api_key: string | null;
+  gemini_api_key: string | null;
+  anthropic_api_key: string | null;
   hubspot_api_key: string | null; pipedrive_api_key: string | null; pipedrive_domain: string | null;
   salesforce_instance_url: string | null; salesforce_access_token: string | null;
   zoho_client_id: string | null; zoho_client_secret: string | null; zoho_refresh_token: string | null;
@@ -70,9 +74,6 @@ interface ToolCfg {
 }
 
 const TOOLS: ToolCfg[] = [
-  { id: "n8n", name: "n8n Webhook", description: "Workflow-Automation & Lead-Verarbeitung.", icon: <Webhook className="size-8" />,
-    fields: [{ key: "n8n_webhook_url", label: "Webhook URL", placeholder: "https://n8n.deine-domain.de/webhook/...", type: "url" }],
-    isConnected: (s) => !!s.n8n_webhook_url?.trim() },
   { id: "gemini", name: "Google Gemini", description: "KI-gestützte Lead-Analyse & Bewertung.", icon: <Sparkles className="size-8" />,
     fields: [{ key: "gemini_api_key", label: "API Key", placeholder: "AIza...", type: "secret" }],
     isConnected: (s) => !!s.gemini_api_key?.trim() },
@@ -130,13 +131,13 @@ interface NotifPrefs { email_new_lead: boolean; email_campaign_done: boolean; em
 export default function SettingsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const tabs = ["company", "profile", "integrations", "leads", "campaigns", "outreach", "seo", "notifications"];
+  const tabs = ["company", "profile", "branding", "integrations", "leads", "campaigns", "outreach", "seo", "notifications"];
   const paramTab = searchParams.get("tab") ?? "";
   const initialTab = tabs.includes(paramTab) ? paramTab : "company";
 
   const [activeTab, setActiveTab] = useState(initialTab);
   const [settings, setSettings] = useState<Settings>({
-    n8n_webhook_url: null, gemini_api_key: null, hubspot_api_key: null, pipedrive_api_key: null,
+    gemini_api_key: null, anthropic_api_key: null, hubspot_api_key: null, pipedrive_api_key: null,
     pipedrive_domain: null, salesforce_instance_url: null, salesforce_access_token: null,
     zoho_client_id: null, zoho_client_secret: null, zoho_refresh_token: null, webhook_url: null,
     unipile_api_key: null, unipile_dsn: null, unipile_account_id: null, linkedin_daily_limit: 25,
@@ -243,7 +244,8 @@ export default function SettingsPage() {
         const { data: d } = await res.json();
         if (d) {
           setSettings({
-            n8n_webhook_url: d.n8n_webhook_url ?? "", gemini_api_key: d.gemini_api_key ?? "",
+            gemini_api_key: d.gemini_api_key ?? "",
+            anthropic_api_key: d.anthropic_api_key ?? "",
             hubspot_api_key: d.hubspot_api_key ?? "", pipedrive_api_key: d.pipedrive_api_key ?? "",
             pipedrive_domain: d.pipedrive_domain ?? "", salesforce_instance_url: d.salesforce_instance_url ?? "",
             salesforce_access_token: d.salesforce_access_token ?? "", zoho_client_id: d.zoho_client_id ?? "",
@@ -482,12 +484,14 @@ export default function SettingsPage() {
           <TabsList className="flex-wrap h-auto gap-1">
             <TabsTrigger value="company">Unternehmen</TabsTrigger>
             <TabsTrigger value="profile">Profil</TabsTrigger>
+            <TabsTrigger value="branding">Branding</TabsTrigger>
             <TabsTrigger value="integrations">Integrationen</TabsTrigger>
             <TabsTrigger value="leads">Leads</TabsTrigger>
             <TabsTrigger value="campaigns">Kampagnen</TabsTrigger>
             <TabsTrigger value="outreach">Outreach</TabsTrigger>
             <TabsTrigger value="seo">SEO</TabsTrigger>
             <TabsTrigger value="notifications">Benachrichtigungen</TabsTrigger>
+            <TabsTrigger value="social-media">Social Media</TabsTrigger>
           </TabsList>
 
           {/* ═══ UNTERNEHMEN ═══ */}
@@ -633,6 +637,11 @@ export default function SettingsPage() {
                 </Button>
               </CardFooter>
             </Card>
+          </TabsContent>
+
+          {/* ═══ BRANDING ═══ */}
+          <TabsContent value="branding" className="space-y-4">
+            <BrandingSettings />
           </TabsContent>
 
           {/* ═══ INTEGRATIONEN ═══ */}
@@ -864,6 +873,8 @@ export default function SettingsPage() {
 
           {/* ═══ KAMPAGNEN ═══ */}
           <TabsContent value="campaigns" className="space-y-4">
+            <EmailAccountsManager />
+
             <Card className="shadow-xs">
               <CardHeader>
                 <CardTitle>E-Mail-Kampagnen</CardTitle>
@@ -1210,6 +1221,11 @@ export default function SettingsPage() {
                 <Button onClick={handleSaveNotifSettings} disabled={savingNotifs}>{savingNotifs && <Loader2 className="mr-2 size-4 animate-spin" />}Speichern</Button>
               </CardFooter>
             </Card>
+          </TabsContent>
+
+          {/* ═══ SOCIAL MEDIA ═══ */}
+          <TabsContent value="social-media" className="space-y-4">
+            <SocialMediaAccountsManager />
           </TabsContent>
         </Tabs>
       </div>

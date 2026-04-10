@@ -1,5 +1,5 @@
 /* ── Tracking: POST /api/track/bounce ──
- * Aufgerufen von n8n mit shared secret.
+ * Aufgerufen via API mit shared secret.
  * Body: { email: string, bounce_type?: "hard" | "soft" }
  */
 
@@ -8,9 +8,16 @@ import { trackBounce } from "@/lib/supabase/campaigns";
 
 export async function POST(request: NextRequest) {
   try {
-    // Shared secret prüfen
-    const secret = request.headers.get("x-n8n-secret");
-    if (!secret || secret !== process.env.N8N_WEBHOOK_SECRET) {
+    // Shared secret prüfen (Authorization header oder x-api-secret)
+    const authHeader = request.headers.get("authorization");
+    const apiSecret = request.headers.get("x-api-secret");
+    const cronSecret = process.env.CRON_SECRET;
+
+    const isAuthorized =
+      (authHeader && authHeader === `Bearer ${cronSecret}`) ||
+      (apiSecret && apiSecret === cronSecret);
+
+    if (!cronSecret || !isAuthorized) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 

@@ -258,9 +258,9 @@ export default async function DashboardOverview() {
         <div className="px-4 lg:px-6 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="h-6 w-6 rounded-md bg-blue-100 flex items-center justify-center">
-                <Linkedin className="h-3.5 w-3.5 text-blue-600" />
-              </div>
+              <Badge variant="outline" className="h-6 w-6 p-0 rounded-md bg-blue-50 border-blue-200 text-blue-600 justify-center">
+                <Linkedin className="h-3.5 w-3.5" />
+              </Badge>
               <h2 className="text-sm font-semibold">LinkedIn Outreach</h2>
             </div>
             <Button variant="ghost" size="sm" className="text-xs gap-1.5" asChild>

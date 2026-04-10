@@ -116,7 +116,7 @@ export function CampaignCreateDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-xl p-0 gap-0">
+        <DialogContent className="sm:max-w-2xl p-0 gap-0">
           <DialogHeader className="px-6 pt-6 pb-4">
             <DialogTitle className="text-lg">
               Neue Kampagne erstellen
@@ -289,10 +289,10 @@ export function CampaignCreateDialog({
                 </div>
 
                 {selectedIds.size > 0 ? (
-                  <div className="rounded-lg border bg-muted/30 p-4">
+                  <div className="rounded-lg border bg-primary/5 p-4">
                     <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-full bg-emerald-500/10 flex items-center justify-center">
-                        <Users className="h-5 w-5 text-emerald-600" />
+                      <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                        <Users className="h-5 w-5 text-primary" />
                       </div>
                       <div className="flex-1">
                         <p className="text-sm font-semibold">
@@ -302,7 +302,7 @@ export function CampaignCreateDialog({
                           Bereit für den Versand
                         </p>
                       </div>
-                      <Badge className="bg-emerald-500/15 text-emerald-700 border-emerald-500/30">
+                      <Badge className="bg-primary/10 text-primary border-primary/20">
                         {selectedIds.size}
                       </Badge>
                     </div>

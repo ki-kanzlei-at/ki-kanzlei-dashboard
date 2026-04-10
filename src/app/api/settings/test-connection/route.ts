@@ -2,9 +2,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { testConnection as testMicrosoftGraph } from "@/lib/email/microsoft-graph";
 import type { CrmProvider } from "@/lib/crm/types";
 
-type TestProvider = CrmProvider | "unipile";
+type TestProvider = CrmProvider | "unipile" | "microsoft-graph";
 
 export async function POST(request: NextRequest) {
   try {
@@ -69,6 +70,23 @@ export async function POST(request: NextRequest) {
         const key = credentials.unipile_api_key;
         if (!dsn?.trim() || !key?.trim()) return NextResponse.json({ error: "DSN und API Key erforderlich" }, { status: 400 });
         result = await testUnipile(dsn.trim(), key.trim());
+        break;
+      }
+      case "microsoft-graph": {
+        const tid = credentials.ms_tenant_id;
+        const cid = credentials.ms_client_id;
+        const cs = credentials.ms_client_secret;
+        const se = credentials.sender_email;
+        if (!tid?.trim() || !cid?.trim() || !cs?.trim() || !se?.trim()) {
+          return NextResponse.json({ error: "Tenant ID, Client ID, Client Secret und Sender E-Mail erforderlich" }, { status: 400 });
+        }
+        result = await testMicrosoftGraph({
+          tenantId: tid.trim(),
+          clientId: cid.trim(),
+          clientSecret: cs.trim(),
+          senderEmail: se.trim(),
+          senderName: credentials.sender_name?.trim(),
+        });
         break;
       }
       default:

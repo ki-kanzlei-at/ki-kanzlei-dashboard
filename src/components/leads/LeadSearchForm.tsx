@@ -38,14 +38,15 @@ const searchSchema = z
   .object({
     country:      z.string().min(2),
     query:        z.string().optional(),
-    location:     z.string().optional(),
+    locations:    z.array(z.string()).optional(),
     city:         z.string().optional(),
     company_type: z.string().optional(),
     require_ceo:  z.boolean().optional(),
   })
   .superRefine((data, ctx) => {
-    const hasQuery = data.query && data.query.trim().length >= 2;
-    const hasCity  = data.city && data.city.trim().length >= 1;
+    const hasQuery     = data.query && data.query.trim().length >= 2;
+    const hasCity      = data.city && data.city.trim().length >= 1;
+    const hasLocations = data.locations && data.locations.length > 0;
 
     if (!hasQuery && !hasCity) {
       ctx.addIssue({
@@ -55,12 +56,11 @@ const searchSchema = z
       });
     }
 
-    // Nur Fehler wenn weder Region noch Stadt angegeben
-    if (hasQuery && !hasCity && !data.location) {
+    if (hasQuery && !hasCity && !hasLocations) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Bitte Region wählen oder Stadt eingeben",
-        path: ["location"],
+        path: ["locations"],
       });
     }
   });
@@ -80,18 +80,23 @@ export function LeadSearchForm({ onSubmit, isSearching, defaultCountry, defaultR
   const form = useForm<SearchFormValues>({
     resolver: zodResolver(searchSchema),
     defaultValues: {
-      country: defaultCountry || "AT", query: "", location: "", city: "",
-      company_type: "all", require_ceo: defaultRequireCeo ?? false,
+      country: defaultCountry || "AT",
+      query: "",
+      locations: [],
+      city: "",
+      company_type: "all",
+      require_ceo: defaultRequireCeo ?? false,
     },
   });
 
   const selectedCountry = form.watch("country");
+  const selectedLocations = form.watch("locations") ?? [];
   const regionOptions = getRegionOptions(selectedCountry);
   const regionLabel = getRegionLabel(selectedCountry);
 
   function handleCountryChange(value: string) {
     form.setValue("country", value);
-    form.setValue("location", "");
+    form.setValue("locations", []);
     form.clearErrors();
   }
 
@@ -101,11 +106,16 @@ export function LeadSearchForm({ onSubmit, isSearching, defaultCountry, defaultR
     const values = form.getValues();
     await onSubmit({
       ...values,
-      location: values.location || undefined,
       company_type: values.company_type === "all" ? undefined : values.company_type,
     }, "native");
-    form.reset({ country: values.country });
+    form.reset({
+      country: values.country,
+      locations: [],
+      require_ceo: values.require_ceo,
+    });
   }
+
+  // unused — FilterCombobox builds its own label from options
 
   return (
     <Form {...form}>
@@ -125,7 +135,7 @@ export function LeadSearchForm({ onSubmit, isSearching, defaultCountry, defaultR
                       <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/40" />
                         <Input
-                          placeholder="z.B. Steuerberater"
+                          placeholder="z.B. Steuerberater, Anwalt, Arzt"
                           className="pl-9"
                           {...field}
                           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleSubmit(); } }}
@@ -154,22 +164,34 @@ export function LeadSearchForm({ onSubmit, isSearching, defaultCountry, defaultR
               </FormItem>
             </div>
 
-            {/* Row 2: Region + Stadt */}
+            {/* Row 2: Region (Multi) + Stadt */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <FormField
                 control={form.control}
-                name="location"
+                name="locations"
                 render={({ field }) => (
                   <FormItem className="min-w-0">
-                    <FormLabel>{regionLabel}</FormLabel>
+                    <FormLabel>
+                      {regionLabel}
+                      {selectedLocations.length > 1 && (
+                        <span className="ml-1.5 text-xs text-primary font-normal">
+                          → {selectedLocations.length} Suchaufträge
+                        </span>
+                      )}
+                    </FormLabel>
                     <FilterCombobox
-                      value={field.value || "all"}
-                      onChange={(val) => { field.onChange(val === "all" ? "" : val); form.clearErrors("location"); }}
-                      options={regionOptions.filter((o) => o.value !== "all").map((o) => ({ value: o.value, label: o.label }))}
-                      placeholder={`Alle ${regionLabel === "Kanton" ? "Kantone" : "Bundesländer"}`}
+                      multi
+                      value={field.value ?? []}
+                      onChange={(val) => {
+                        field.onChange(val);
+                        form.clearErrors("locations");
+                      }}
+                      options={regionOptions
+                        .filter((o) => o.value !== "all")
+                        .map((o) => ({ value: o.value, label: o.label }))}
+                      placeholder={`${regionLabel === "Kanton" ? "Kanton" : "Bundesland"} wählen`}
                       searchPlaceholder={`${regionLabel} suchen…`}
                       emptyText={`Kein ${regionLabel} gefunden`}
-                      allLabel={`Alle ${regionLabel === "Kanton" ? "Kantone" : "Bundesländer"}`}
                       className="w-full"
                     />
                     <FormMessage />
@@ -258,7 +280,11 @@ export function LeadSearchForm({ onSubmit, isSearching, defaultCountry, defaultR
                 ) : (
                   <Search className="h-4 w-4" />
                 )}
-                {isSearching ? "Suche läuft…" : "Leads suchen"}
+                {isSearching
+                  ? "Suche läuft…"
+                  : selectedLocations.length > 1
+                    ? `${selectedLocations.length} Suchen starten`
+                    : "Leads suchen"}
               </Button>
             </div>
 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
-import { Search, X, Check, Users } from "lucide-react";
+import { Search, X, Check, Users, CheckSquare } from "lucide-react";
 
 import {
   Dialog,
@@ -10,7 +10,6 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -218,7 +217,7 @@ export function LeadPickerDialog({
         <Separator />
 
         {/* Filters */}
-        <div className="px-6 py-3 bg-muted/20 border-b">
+        <div className="px-6 py-3 bg-muted/20 border-b shrink-0">
           <div className="flex items-center gap-2 flex-wrap">
             <InputGroup className="h-8 w-56">
               <InputGroupAddon>
@@ -377,7 +376,7 @@ export function LeadPickerDialog({
         {totalPages > 1 && (
           <>
             <Separator />
-            <div className="px-6 py-2 flex items-center justify-between">
+            <div className="px-6 py-2 flex items-center justify-between shrink-0">
               <p className="text-xs text-muted-foreground">
                 Seite {page} von {totalPages}
               </p>
@@ -422,20 +421,46 @@ export function LeadPickerDialog({
           </>
         )}
 
-        <Separator />
-
-        {/* Footer */}
-        <DialogFooter className="px-6 py-4">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Abbrechen
-          </Button>
-          <Button
-            disabled={selected.size === 0}
-            onClick={() => onConfirm(selected)}
-          >
-            {selected.size} Lead{selected.size !== 1 ? "s" : ""} übernehmen
-          </Button>
-        </DialogFooter>
+        {/* Fixed Bottom Bar */}
+        <div className="shrink-0 border-t bg-muted/30 px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            {selected.size > 0 ? (
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 bg-primary/10 rounded-md px-2.5 py-1">
+                  <CheckSquare className="h-3.5 w-3.5 text-primary" />
+                  <span className="text-xs font-semibold text-primary">
+                    {selected.size} ausgewählt
+                  </span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs text-muted-foreground"
+                  onClick={() => setSelected(new Set())}
+                >
+                  <X className="h-3 w-3 mr-1" />
+                  Auswahl aufheben
+                </Button>
+              </div>
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                Wähle Leads mit E-Mail-Adresse aus
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+              Abbrechen
+            </Button>
+            <Button
+              size="sm"
+              disabled={selected.size === 0}
+              onClick={() => onConfirm(selected)}
+            >
+              {selected.size} Lead{selected.size !== 1 ? "s" : ""} übernehmen
+            </Button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

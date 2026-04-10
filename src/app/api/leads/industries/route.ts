@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getDistinctIndustries } from "@/lib/supabase/leads";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const supabase = await createClient();
     const {
@@ -14,7 +14,9 @@ export async function GET() {
       return NextResponse.json({ error: "Nicht authentifiziert" }, { status: 401 });
     }
 
-    const industries = await getDistinctIndustries();
+    const { searchParams } = new URL(request.url);
+    const status = searchParams.get("status") || undefined;
+    const industries = await getDistinctIndustries(status);
 
     return NextResponse.json({ data: industries });
   } catch (error) {

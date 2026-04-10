@@ -123,6 +123,8 @@ export async function PATCH(request: NextRequest) {
       campaign_settings: sanitizeJsonb(body.campaign_settings),
       seo_settings: sanitizeJsonb(body.seo_settings),
       notification_settings: sanitizeJsonb(body.notification_settings),
+      anthropic_api_key: sanitizeString(body.anthropic_api_key, 512),
+      brand_settings: sanitizeJsonb(body.brand_settings),
     });
 
     return NextResponse.json({ data: settings });

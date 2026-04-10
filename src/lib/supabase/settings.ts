@@ -36,6 +36,12 @@ export interface CampaignSettings {
   unsub_link?: boolean;
   bounce_action?: string;
   signature?: string;
+  /* Microsoft Graph E-Mail-Versand */
+  ms_tenant_id?: string;
+  ms_client_id?: string;
+  ms_client_secret?: string;
+  sender_email?: string;
+  sender_name?: string;
 }
 
 export interface SeoSettings {
@@ -56,6 +62,21 @@ export interface NotificationSettings {
   email_linkedin_reply?: boolean;
   push_new_lead?: boolean;
   push_campaign_error?: boolean;
+}
+
+export interface BrandSettings {
+  company_name?: string;
+  website?: string;
+  primary_color?: string;
+  accent_color?: string;
+  dark_bg?: string;
+  text_color?: string;
+  muted_color?: string;
+  font_family?: string;
+  font_cdn_url?: string;
+  logo_svg?: string;
+  logo_url?: string;
+  tagline?: string;
 }
 
 export interface UserSettings {
@@ -81,11 +102,14 @@ export interface UserSettings {
   linkedin_follow_up_days: number | null;
   linkedin_sender_profile: LinkedInSenderProfile | null;
   linkedin_outreach_template: string | null;
+  /* AI */
+  anthropic_api_key: string | null;
   /* Grouped settings */
   lead_settings: LeadSettings | null;
   campaign_settings: CampaignSettings | null;
   seo_settings: SeoSettings | null;
   notification_settings: NotificationSettings | null;
+  brand_settings: BrandSettings | null;
   created_at: string;
   updated_at: string;
 }
@@ -94,6 +118,7 @@ export type UserSettingsUpdate = Partial<
   Pick<UserSettings,
     | "n8n_webhook_url"
     | "gemini_api_key"
+    | "anthropic_api_key"
     | "hubspot_api_key"
     | "pipedrive_api_key"
     | "pipedrive_domain"
@@ -115,6 +140,7 @@ export type UserSettingsUpdate = Partial<
     | "campaign_settings"
     | "seo_settings"
     | "notification_settings"
+    | "brand_settings"
   >
 >;
 
@@ -156,7 +182,7 @@ export async function upsertUserSettings(
   return settings as UserSettings;
 }
 
-/* ── Admin-Zugriff (für n8n Trigger ohne Auth-Cookie) ── */
+/* ── Admin-Zugriff (für Cron Jobs ohne Auth-Cookie) ── */
 export async function getUserSettingsByUserId(
   userId: string,
 ): Promise<UserSettings | null> {

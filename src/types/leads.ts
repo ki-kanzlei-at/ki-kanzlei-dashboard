@@ -4,13 +4,13 @@ export type LeadStatus = "new" | "contacted" | "interested" | "not_interested" |
 
 export interface LeadFilters {
   status?: LeadStatus;
-  city?: string;
+  city?: string | string[];
   country?: string;
   category?: string;
-  industry?: string;
+  industry?: string | string[];
   search_query?: string;
   search_location?: string;
-  legal_form?: string;
+  legal_form?: string | string[];
   /** Volltextsuche über Name, Firma, E-Mail */
   search?: string;
   /** ID-basierter Filter für CRM-Export */

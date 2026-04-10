@@ -12,12 +12,29 @@ function applyFilters(query: any, filters: LeadFilters) {
   let hasFilter = false;
 
   if (filters.status) { query = query.eq("status", filters.status); hasFilter = true; }
-  if (filters.city) { query = query.ilike("city", `%${filters.city}%`); hasFilter = true; }
+  if (filters.city) {
+    if (Array.isArray(filters.city)) { query = query.in("city", filters.city); }
+    else { query = query.eq("city", filters.city); }
+    hasFilter = true;
+  }
   if (filters.category) { query = query.ilike("category", `%${filters.category}%`); hasFilter = true; }
-  if (filters.industry) { query = query.ilike("industry", `%${filters.industry}%`); hasFilter = true; }
+  if (filters.industry) {
+    if (Array.isArray(filters.industry)) { query = query.in("industry", filters.industry); }
+    else { query = query.eq("industry", filters.industry); }
+    hasFilter = true;
+  }
   if (filters.search_query) { query = query.eq("search_query", filters.search_query); hasFilter = true; }
   if (filters.search_location) { query = query.eq("search_location", filters.search_location); hasFilter = true; }
-  if (filters.legal_form) { query = query.eq("legal_form", filters.legal_form); hasFilter = true; }
+  if (filters.legal_form) {
+    if (Array.isArray(filters.legal_form)) {
+      const orClause = filters.legal_form.map((lf) => `legal_form.ilike.%${lf}%`).join(",");
+      query = query.or(orClause);
+    } else {
+      query = query.ilike("legal_form", `%${filters.legal_form}%`);
+    }
+    hasFilter = true;
+  }
+  if (filters.country) { query = query.eq("country", filters.country); hasFilter = true; }
   if (filters.search) {
     const term = `%${filters.search}%`;
     query = query.or(

@@ -33,10 +33,13 @@ export async function GET(request: NextRequest) {
     const statusParam = searchParams.get("status");
     const searchQuery = searchParams.get("search_query");
     const search = searchParams.get("search");
-    const industry = searchParams.get("industry");
-    const city = searchParams.get("city");
+    const industryRaw = searchParams.get("industry");
+    const cityRaw = searchParams.get("city");
+    const industry = industryRaw ? industryRaw.split(",").filter(Boolean) : undefined;
+    const city = cityRaw ? cityRaw.split(",").filter(Boolean) : undefined;
     const country = searchParams.get("country");
-    const legalForm = searchParams.get("legal_form");
+    const legalFormRaw = searchParams.get("legal_form");
+    const legalForm = legalFormRaw ? legalFormRaw.split(",").filter(Boolean) : undefined;
     const sortBy = searchParams.get("sort_by");
     const sortDir = searchParams.get("sort_dir");
     const page = parseInt(searchParams.get("page") ?? "1", 10);

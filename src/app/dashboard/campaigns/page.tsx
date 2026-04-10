@@ -14,6 +14,9 @@ import {
   Eye,
   X,
   Send,
+  Flame,
+  Mail,
+  TrendingUp,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -54,14 +57,31 @@ import {
 } from "@/components/ui/empty";
 
 import { CampaignCreateDialog } from "@/components/campaigns/CampaignCreateDialog";
+import { Progress } from "@/components/ui/progress";
+import { cn } from "@/lib/utils";
 import type { Campaign, CampaignStatus } from "@/types/campaigns";
+
+/* ── Email Account type (for warmup overview) ── */
+interface EmailAccountSummary {
+  id: string;
+  label: string;
+  sender_email: string;
+  is_active: boolean;
+  warmup_enabled: boolean;
+  warmup_day: number;
+  warmup_start: number;
+  warmup_increment: number;
+  daily_limit: number;
+  sent_today: number;
+  health_status: string;
+}
 
 /* ── Status Config ── */
 const STATUS_CONFIG: Record<CampaignStatus, { label: string; className: string }> = {
-  draft:     { label: "Entwurf",  className: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400" },
-  active:    { label: "Aktiv",    className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400" },
-  paused:    { label: "Pausiert", className: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400" },
-  completed: { label: "Fertig",   className: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400" },
+  draft:     { label: "Entwurf",  className: "bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-400" },
+  active:    { label: "Aktiv",    className: "bg-primary/10 text-primary border-primary/20" },
+  paused:    { label: "Pausiert", className: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-400" },
+  completed: { label: "Fertig",   className: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-400" },
 };
 
 function pct(count: number, total: number): string {
@@ -84,6 +104,19 @@ export default function CampaignsPage() {
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [createOpen, setCreateOpen] = useState(false);
+  const [emailAccounts, setEmailAccounts] = useState<EmailAccountSummary[]>([]);
+
+  // Fetch email accounts for warmup overview
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/email-accounts");
+        if (!res.ok) return;
+        const { data } = await res.json();
+        setEmailAccounts(data ?? []);
+      } catch { /* silent */ }
+    })();
+  }, []);
 
   const fetchCampaigns = useCallback(async () => {
     setLoading(true);
@@ -202,6 +235,78 @@ export default function CampaignsPage() {
         </CardContent>
       </Card>
 
+      {/* ── Warmup & Accounts Overview ── */}
+      {emailAccounts.length > 0 && (
+        <Card>
+          <CardContent className="py-4 px-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Flame className="h-4 w-4 text-orange-500" />
+              <span className="text-sm font-semibold">E-Mail-Konten & Warmup</span>
+              <span className="text-xs text-muted-foreground ml-auto">
+                {emailAccounts.filter((a) => a.is_active).length} aktiv · Kapazität: {emailAccounts.filter((a) => a.is_active).reduce((s, a) => {
+                  if (!a.warmup_enabled) return s + a.daily_limit;
+                  const effective = Math.min(a.daily_limit, a.warmup_start + a.warmup_increment * a.warmup_day);
+                  return s + effective;
+                }, 0)} E-Mails/Tag
+              </span>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {emailAccounts.filter((a) => a.is_active).map((acc) => {
+                const effectiveLimit = acc.warmup_enabled
+                  ? Math.min(acc.daily_limit, acc.warmup_start + acc.warmup_increment * acc.warmup_day)
+                  : acc.daily_limit;
+                const warmupProgress = acc.warmup_enabled
+                  ? Math.min(100, (effectiveLimit / acc.daily_limit) * 100)
+                  : 100;
+                const daysLeft = acc.warmup_enabled && effectiveLimit < acc.daily_limit
+                  ? Math.ceil((acc.daily_limit - effectiveLimit) / acc.warmup_increment)
+                  : 0;
+                return (
+                  <div key={acc.id} className="flex items-center gap-3 rounded-lg border p-3">
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "size-2.5 p-0 rounded-full border-0 shrink-0",
+                        acc.health_status === "good"    ? "bg-green-500" :
+                        acc.health_status === "warning" ? "bg-amber-500" :
+                        acc.health_status === "bad"     ? "bg-red-500"   : "bg-muted-foreground/40",
+                      )}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium truncate">{acc.label || acc.sender_email}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        {acc.warmup_enabled ? (
+                          <>
+                            <Progress value={warmupProgress} className="h-1 flex-1" />
+                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-normal shrink-0">
+                              {effectiveLimit}/{acc.daily_limit}
+                            </Badge>
+                          </>
+                        ) : (
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-normal gap-1">
+                            <TrendingUp className="size-3" /> {acc.daily_limit}/Tag
+                          </Badge>
+                        )}
+                      </div>
+                      {acc.warmup_enabled && daysLeft > 0 && (
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal mt-1 border-orange-200 bg-orange-50 text-orange-600">
+                          Tag {acc.warmup_day} · {daysLeft}d bis Volllast
+                        </Badge>
+                      )}
+                      {acc.warmup_enabled && daysLeft === 0 && (
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal mt-1 border-green-200 bg-green-50 text-green-700">
+                          Warmup abgeschlossen
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* ── Campaign List ── */}
       {loading ? (
         <div className="space-y-3">
@@ -270,7 +375,7 @@ export default function CampaignsPage() {
                     <TableCell className="pl-5">
                       <div className="flex items-center gap-1.5">
                         <Badge
-                          variant="secondary"
+                          variant="outline"
                           className={`text-[11px] font-medium px-2.5 py-0.5 ${cfg.className}`}
                         >
                           {cfg.label}

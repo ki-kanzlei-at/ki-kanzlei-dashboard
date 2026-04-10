@@ -7,6 +7,14 @@
     {
       "path": "/api/cron/linkedin-followups",
       "schedule": "0 10 * * 1-5"
+    },
+    {
+      "path": "/api/cron/campaign-emails",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/social-media-publish",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

@@ -13,12 +13,20 @@ import {
   Trash2,
   Search,
   X,
+  Users,
+  Send,
+  MailOpen,
+  Reply,
+  TrendingUp,
+  TrendingDown,
 } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card, CardContent, CardHeader, CardTitle, CardDescription, CardAction,
+} from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
@@ -48,10 +56,10 @@ import type { Campaign, CampaignLead, CampaignLeadStatus, CampaignStatus } from 
 
 /* ── Config ── */
 const STATUS_CONFIG: Record<CampaignStatus, { label: string; className: string }> = {
-  draft:     { label: "Entwurf",  className: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400" },
-  active:    { label: "Aktiv",    className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400" },
-  paused:    { label: "Pausiert", className: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400" },
-  completed: { label: "Fertig",   className: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400" },
+  draft:     { label: "Entwurf",  className: "bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-400" },
+  active:    { label: "Aktiv",    className: "bg-primary/10 text-primary border-primary/20" },
+  paused:    { label: "Pausiert", className: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-400" },
+  completed: { label: "Fertig",   className: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-400" },
 };
 
 const LEAD_STATUS_CONFIG: Record<CampaignLeadStatus, { label: string; className: string }> = {
@@ -225,7 +233,7 @@ export default function CampaignDetailPage() {
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold tracking-tight">{campaign.name}</h1>
               <Badge
-                variant="secondary"
+                variant="outline"
                 className={`text-[11px] font-medium px-2.5 py-0.5 ${cfg.className}`}
               >
                 {cfg.label}
@@ -291,25 +299,71 @@ export default function CampaignDetailPage() {
       )}
 
       {/* ── Stats Cards ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 *:data-[slot=card]:shadow-xs">
         {[
-          { value: campaign.total_count, label: "Leads gesamt", color: "" },
-          { value: campaign.sent_count, label: "Gesendet", color: "" },
-          { value: pct(campaign.open_count, campaign.sent_count), label: "Open Rate", color: "text-amber-600" },
-          { value: pct(campaign.reply_count, campaign.sent_count), label: "Reply Rate", color: "text-emerald-600" },
-          { value: pct(campaign.bounce_count, campaign.sent_count), label: "Bounce Rate", color: "text-red-500" },
-        ].map((stat) => (
-          <Card key={stat.label}>
-            <CardContent className="pt-5 pb-4 px-5">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  {stat.label}
-                </span>
-              </div>
-              <p className={`text-3xl font-bold tabular-nums ${stat.color}`}>
-                {stat.value}
-              </p>
-            </CardContent>
+          {
+            value: campaign.total_count,
+            label: "Leads gesamt",
+            trend: `${campaign.sent_count} verarbeitet`,
+            trendUp: campaign.sent_count > 0,
+            Icon: Users,
+          },
+          {
+            value: campaign.sent_count,
+            label: "Gesendet",
+            trend: campaign.total_count > 0 ? `${((campaign.sent_count / campaign.total_count) * 100).toFixed(0)}% abgeschlossen` : "0%",
+            trendUp: campaign.sent_count > 0,
+            Icon: Send,
+          },
+          {
+            value: pct(campaign.open_count, campaign.sent_count),
+            label: "Open Rate",
+            trend: `${campaign.open_count} geöffnet`,
+            trendUp: campaign.sent_count > 0 && (campaign.open_count / campaign.sent_count) > 0.2,
+            Icon: MailOpen,
+          },
+          {
+            value: pct(campaign.reply_count, campaign.sent_count),
+            label: "Reply Rate",
+            trend: `${campaign.reply_count} Antworten`,
+            trendUp: campaign.sent_count > 0 && (campaign.reply_count / campaign.sent_count) > 0.05,
+            Icon: Reply,
+          },
+          {
+            value: pct(campaign.bounce_count, campaign.sent_count),
+            label: "Bounce Rate",
+            trend: `${campaign.bounce_count} Bounces`,
+            trendUp: campaign.bounce_count === 0,
+            Icon: AlertTriangle,
+          },
+        ].map(({ value, label, trend, trendUp, Icon }) => (
+          <Card key={label} className="@container/card">
+            <CardHeader>
+              <CardDescription className="flex items-center gap-1.5">
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+              </CardDescription>
+              <CardTitle className="text-2xl font-bold tabular-nums @[250px]/card:text-3xl">
+                {value}
+              </CardTitle>
+              <CardAction>
+                <Badge
+                  variant="outline"
+                  className={`gap-1 ${
+                    trendUp
+                      ? "text-primary border-primary/20 bg-primary/5"
+                      : "text-muted-foreground"
+                  }`}
+                >
+                  {trendUp ? (
+                    <TrendingUp className="h-3 w-3" />
+                  ) : (
+                    <TrendingDown className="h-3 w-3" />
+                  )}
+                  {trend}
+                </Badge>
+              </CardAction>
+            </CardHeader>
           </Card>
         ))}
       </div>
