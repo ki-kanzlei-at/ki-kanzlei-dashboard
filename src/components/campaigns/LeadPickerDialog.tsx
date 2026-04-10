@@ -84,7 +84,7 @@ export function LeadPickerDialog({
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
-  const [industry, setIndustry] = useState<string | undefined>(undefined);
+  const [industry, setIndustry] = useState<string[]>([]);
   const [city, setCity] = useState("");
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -121,7 +121,7 @@ export function LeadPickerDialog({
       });
       if (search) params.set("search", search);
       if (status !== "all") params.set("status", status);
-      if (industry) params.set("industry", industry);
+      if (industry.length > 0) params.set("industry", industry.join(","));
       if (city) params.set("city", city);
 
       const res = await fetch(`/api/leads?${params.toString()}`);
@@ -190,7 +190,7 @@ export function LeadPickerDialog({
   function resetFilters() {
     setSearch("");
     setStatus("all");
-    setIndustry(undefined);
+    setIndustry([]);
     setCity("");
     setPage(1);
   }
@@ -247,7 +247,7 @@ export function LeadPickerDialog({
             <div className="w-44">
               <IndustryCombobox
                 value={industry}
-                onChange={(val) => setIndustry(val ?? undefined)}
+                onChange={setIndustry}
                 placeholder="Branche"
                 options={industryOptions.length > 0 ? industryOptions : undefined}
               />

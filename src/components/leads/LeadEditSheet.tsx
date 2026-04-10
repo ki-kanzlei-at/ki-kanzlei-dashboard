@@ -307,8 +307,8 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved }: LeadEditShe
                         <FormLabel className="text-xs text-muted-foreground">Branche</FormLabel>
                         <FormControl>
                           <IndustryCombobox
-                            value={field.value || undefined}
-                            onChange={(val) => field.onChange(val ?? "")}
+                            value={field.value ? [field.value] : []}
+                            onChange={(val) => field.onChange(val[0] ?? "")}
                           />
                         </FormControl>
                         <FormMessage />

@@ -213,8 +213,8 @@ export function LeadEditDialog({
                   <FormLabel>Branche</FormLabel>
                   <FormControl>
                     <IndustryCombobox
-                      value={field.value || undefined}
-                      onChange={(val) => field.onChange(val ?? "")}
+                      value={field.value ? [field.value] : []}
+                      onChange={(val) => field.onChange(val[0] ?? "")}
                     />
                   </FormControl>
                   <FormMessage />

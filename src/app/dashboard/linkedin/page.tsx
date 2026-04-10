@@ -78,8 +78,8 @@ export default function LinkedInPage() {
   // Filters
   const [filterSearch, setFilterSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
-  const [filterIndustry, setFilterIndustry] = useState<string | undefined>(undefined);
-  const [filterLocation, setFilterLocation] = useState<string | undefined>(undefined);
+  const [filterIndustry, setFilterIndustry] = useState<string[]>([]);
+  const [filterLocation, setFilterLocation] = useState<string[]>([]);
 
   // Sorting & Column Visibility (driven by tanstack table)
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -101,13 +101,13 @@ export default function LinkedInPage() {
   const totalPages = Math.max(1, Math.ceil(totalLeads / PAGE_SIZE));
   const pageNumbers = buildPageNumbers(page, totalPages);
 
-  const hasActiveFilters = filterSearch || filterStatus !== "all" || filterIndustry || filterLocation || sorting.length > 0;
+  const hasActiveFilters = filterSearch || filterStatus !== "all" || filterIndustry.length > 0 || filterLocation.length > 0 || sorting.length > 0;
 
   function resetFilters() {
     setFilterSearch("");
     setFilterStatus("all");
-    setFilterIndustry(undefined);
-    setFilterLocation(undefined);
+    setFilterIndustry([]);
+    setFilterLocation([]);
     setSorting([]);
     setPage(1);
   }
@@ -148,8 +148,8 @@ export default function LinkedInPage() {
       params.set("pageSize", String(PAGE_SIZE));
       if (filterStatus !== "all") params.set("status", filterStatus);
       if (filterSearch.trim()) params.set("search", filterSearch.trim());
-      if (filterIndustry) params.set("industry", filterIndustry);
-      if (filterLocation) params.set("location", filterLocation);
+      if (filterIndustry.length > 0) params.set("industry", filterIndustry.join(","));
+      if (filterLocation.length > 0) params.set("location", filterLocation.join(","));
       if (sortBy) params.set("sort_by", sortBy);
       if (sortDir) params.set("sort_dir", sortDir);
 
@@ -521,7 +521,7 @@ export default function LinkedInPage() {
               <div className="w-52">
                 <IndustryCombobox
                   value={filterIndustry}
-                  onChange={(val) => setFilterIndustry(val ?? undefined)}
+                  onChange={setFilterIndustry}
                   placeholder="Branche filtern"
                   options={industryOptions.length > 0 ? industryOptions : undefined}
                 />
@@ -532,7 +532,7 @@ export default function LinkedInPage() {
                 <div className="w-52">
                   <IndustryCombobox
                     value={filterLocation}
-                    onChange={(val) => setFilterLocation(val ?? undefined)}
+                    onChange={setFilterLocation}
                     placeholder="Standort filtern"
                     options={locationOptions}
                   />
