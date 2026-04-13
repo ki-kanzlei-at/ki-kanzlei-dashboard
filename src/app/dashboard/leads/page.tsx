@@ -62,6 +62,7 @@ import { FilterCombobox } from "@/components/leads/FilterCombobox";
 import type { SearchFormValues, SearchSource } from "@/components/leads/LeadSearchForm";
 
 import type { Lead, LeadStatus, SearchJob } from "@/types/leads";
+import { INDUSTRY_OPTIONS } from "@/types/leads";
 
 // We need a ref to the table instance for the DataTableViewOptions
 import { useReactTable, getCoreRowModel, type ColumnDef } from "@tanstack/react-table";
@@ -126,7 +127,7 @@ export default function LeadScrapingPage() {
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
 
   /* ── Dynamic Filter Options ── */
-  const [industryOptions, setIndustryOptions] = useState<{ value: string; label: string }[]>([]);
+  const [industryOptions, setIndustryOptions] = useState<{ value: string; label: string }[]>([...INDUSTRY_OPTIONS]);
   const [cityOptions, setCityOptions]     = useState<{ value: string; label: string }[]>([]);
   const [countryOptions, setCountryOptions] = useState<{ value: string; label: string }[]>([]);
 
@@ -204,14 +205,14 @@ export default function LeadScrapingPage() {
         const res = await fetch(url);
         if (!res.ok) return;
         const json = await res.json();
-        const newOptions = (json.data as string[]).map((v) => ({ value: v, label: v }));
-        setIndustryOptions(newOptions);
-        // Nicht mehr vorhandene Branchen aus Auswahl entfernen
-        if (filterIndustries.length > 0) {
-          const validSet = new Set(newOptions.map((o) => o.value));
-          const valid = filterIndustries.filter((i) => validSet.has(i));
-          if (valid.length !== filterIndustries.length) setFilterIndustries(valid);
-        }
+        const dbValues = (json.data as string[]);
+        // INDUSTRY_OPTIONS als Master-Liste + eventuelle DB-Werte die noch nicht in OPTIONS sind
+        const optionsSet = new Set(INDUSTRY_OPTIONS.map((o) => o.value));
+        const merged: { value: string; label: string }[] = [
+          ...INDUSTRY_OPTIONS,
+          ...dbValues.filter((v) => !optionsSet.has(v)).map((v) => ({ value: v, label: v })),
+        ];
+        setIndustryOptions(merged);
       } catch { /* silent */ }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
