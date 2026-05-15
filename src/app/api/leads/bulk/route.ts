@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { bundeslandToOrClauses } from "@/lib/bundesland";
 import type { LeadStatus, LeadFilters } from "@/types/leads";
 
 const VALID_STATUSES: LeadStatus[] = ["new", "contacted", "interested", "not_interested", "converted"];
@@ -35,6 +36,12 @@ function applyFilters(query: any, filters: LeadFilters) {
     hasFilter = true;
   }
   if (filters.country) { query = query.eq("country", filters.country); hasFilter = true; }
+  if (filters.state) {
+    if (!filters.country) query = query.eq("country", "AT");
+    const states = Array.isArray(filters.state) ? filters.state : [filters.state];
+    const clauses = states.flatMap((s) => bundeslandToOrClauses(s));
+    if (clauses.length > 0) { query = query.or(clauses.join(",")); hasFilter = true; }
+  }
   if (filters.search) {
     const term = `%${filters.search}%`;
     query = query.or(

@@ -5,6 +5,7 @@
 
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { extractWithGemini, buildCeoName } from "./gemini";
+import { postalCodeToBundesland } from "@/lib/bundesland";
 import type { LeadInsert } from "@/types/leads";
 
 /* ══════════════════════════════════════════════════════
@@ -684,6 +685,10 @@ async function enrichAndBuildLead(
   // Adresse: Gemini oder Fallback
   const fallbackAddress = parseAddress(place.formattedAddress || "", country);
 
+  const postalCode = aiResult?.postal_code || fallbackAddress.postalCode || null;
+  const leadCountry = aiResult?.country || fallbackAddress.country || country;
+  const state = postalCodeToBundesland(postalCode);
+
   const lead: LeadInsert = {
     company: aiResult?.company_name || companyName,
     company_name: aiResult?.company_name || null,
@@ -694,8 +699,9 @@ async function enrichAndBuildLead(
     address: place.formattedAddress || null,
     street: aiResult?.street || fallbackAddress.street || null,
     city: aiResult?.city || fallbackAddress.city || location,
-    postal_code: aiResult?.postal_code || fallbackAddress.postalCode || null,
-    country: aiResult?.country || fallbackAddress.country || country,
+    postal_code: postalCode,
+    state: state,
+    country: leadCountry,
     category: null,
     industry: aiResult?.industry || capitalizeFirst(query),
     legal_form: aiResult?.legal_form || null,

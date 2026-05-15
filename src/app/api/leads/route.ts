@@ -40,6 +40,8 @@ export async function GET(request: NextRequest) {
     const country = searchParams.get("country");
     const legalFormRaw = searchParams.get("legal_form");
     const legalForm = legalFormRaw ? legalFormRaw.split(",").filter(Boolean) : undefined;
+    const stateRaw = searchParams.get("state");
+    const state = stateRaw ? stateRaw.split(",").filter(Boolean) : undefined;
     const sortBy = searchParams.get("sort_by");
     const sortDir = searchParams.get("sort_dir");
     const page = parseInt(searchParams.get("page") ?? "1", 10);
@@ -76,6 +78,7 @@ export async function GET(request: NextRequest) {
         industry: industry ?? undefined,
         city: city ?? undefined,
         country: country ?? undefined,
+        state: state ?? undefined,
         legal_form: legalForm ?? undefined,
       },
       { page, pageSize: limit },

@@ -5,6 +5,8 @@ export type LeadStatus = "new" | "contacted" | "interested" | "not_interested" |
 export interface LeadFilters {
   status?: LeadStatus;
   city?: string | string[];
+  /** Österreichisches Bundesland – wird serverseitig auf PLZ-Muster gemappt */
+  state?: string | string[];
   country?: string;
   category?: string;
   industry?: string | string[];
@@ -46,6 +48,8 @@ export interface Lead {
   street: string | null;
   city: string | null;
   postal_code: string | null;
+  /** Bundesland / Kanton / State — aus PLZ abgeleitet oder manuell gesetzt */
+  state: string | null;
   country: string;
   category: string | null;
   industry: string | null;
@@ -91,16 +95,17 @@ export interface Lead {
 }
 
 /* Felder für das Erstellen eines neuen Leads */
-export type LeadInsert = Omit<Lead, "id" | "created_at" | "updated_at"> & {
+export type LeadInsert = Omit<Lead, "id" | "created_at" | "updated_at" | "state"> & {
   id?: string;
   created_at?: string;
   updated_at?: string;
+  state?: string | null;
 };
 
 /* Felder für das Aktualisieren eines Leads (alle optional) */
 export type LeadUpdate = Partial<Pick<Lead,
   | "company" | "company_name" | "name" | "email" | "phone" | "website"
-  | "address" | "street" | "city" | "postal_code" | "country"
+  | "address" | "street" | "city" | "postal_code" | "state" | "country"
   | "category" | "industry" | "legal_form" | "employee_count"
   | "ceo_name" | "ceo_title" | "ceo_first_name" | "ceo_last_name" | "ceo_gender" | "ceo_source"
   | "status" | "notes"

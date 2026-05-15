@@ -5,6 +5,7 @@
  */
 
 import { createClient } from "./server";
+import { bundeslandToOrClauses } from "@/lib/bundesland";
 import type {
   Lead,
   LeadInsert,
@@ -113,6 +114,13 @@ export async function getLeads(
   }
   if (filters.country) {
     query = query.eq("country", filters.country);
+  }
+  if (filters.state) {
+    /* Bundesland-Filter: implizit AT-Scope um Kollision mit DE-PLZ zu vermeiden */
+    if (!filters.country) query = query.eq("country", "AT");
+    const states = Array.isArray(filters.state) ? filters.state : [filters.state];
+    const clauses = states.flatMap((s) => bundeslandToOrClauses(s));
+    if (clauses.length > 0) query = query.or(clauses.join(","));
   }
 
   /* ID-Filter (für CRM-Export) */
@@ -310,6 +318,12 @@ function applyFilters(query: any, filters: LeadFilters) {
   if (filters.search_location) { query = query.eq("search_location", filters.search_location); hasFilter = true; }
   if (filters.legal_form) { query = query.eq("legal_form", filters.legal_form); hasFilter = true; }
   if (filters.country) { query = query.eq("country", filters.country); hasFilter = true; }
+  if (filters.state) {
+    if (!filters.country) query = query.eq("country", "AT");
+    const states = Array.isArray(filters.state) ? filters.state : [filters.state];
+    const clauses = states.flatMap((s) => bundeslandToOrClauses(s));
+    if (clauses.length > 0) { query = query.or(clauses.join(",")); hasFilter = true; }
+  }
   if (filters.search) {
     const term = `%${filters.search}%`;
     query = query.or(`name.ilike.${term},company.ilike.${term},company_name.ilike.${term},email.ilike.${term},city.ilike.${term}`);
@@ -390,13 +404,22 @@ export async function getLeadStats(): Promise<LeadStats> {
 }
 
 /**
- * Distinct industries aus der DB holen (nur nicht-leere Werte).
+ * Distinct industries aus der DB holen, gefiltert nach Status, Land und/oder Bundesland.
  */
-export async function getDistinctIndustries(status?: string): Promise<string[]> {
+export async function getDistinctIndustries(
+  filters: { status?: string; country?: string; state?: string | string[] } = {},
+): Promise<string[]> {
   const supabase = await createClient();
 
   let query = supabase.from("leads").select("industry");
-  if (status) query = query.eq("status", status);
+  if (filters.status) query = query.eq("status", filters.status);
+  if (filters.country) query = query.eq("country", filters.country);
+  if (filters.state) {
+    if (!filters.country) query = query.eq("country", "AT");
+    const states = Array.isArray(filters.state) ? filters.state : [filters.state];
+    const clauses = states.flatMap((s) => bundeslandToOrClauses(s));
+    if (clauses.length > 0) query = query.or(clauses.join(","));
+  }
 
   const { data, error } = await query;
 

@@ -63,6 +63,8 @@ import type { SearchFormValues, SearchSource } from "@/components/leads/LeadSear
 
 import type { Lead, LeadStatus, SearchJob } from "@/types/leads";
 import { INDUSTRY_OPTIONS } from "@/types/leads";
+import { AT_BUNDESLAENDER } from "@/lib/bundesland";
+import { createClient as createBrowserClient } from "@/lib/supabase/client";
 
 // We need a ref to the table instance for the DataTableViewOptions
 import { useReactTable, getCoreRowModel, type ColumnDef } from "@tanstack/react-table";
@@ -120,6 +122,7 @@ export default function LeadScrapingPage() {
   const [filterIndustries, setFilterIndustries]   = useState<string[]>([]);
   const [filterLegalForms, setFilterLegalForms]   = useState<string[]>([]);
   const [filterCities, setFilterCities]           = useState<string[]>([]);
+  const [filterStates, setFilterStates]           = useState<string[]>([]);
   const [filterCountry, setFilterCountry]       = useState<string>("all");
 
   /* ── Sorting & Column Visibility ── */
@@ -131,7 +134,7 @@ export default function LeadScrapingPage() {
   const [cityOptions, setCityOptions]     = useState<{ value: string; label: string }[]>([]);
   const [countryOptions, setCountryOptions] = useState<{ value: string; label: string }[]>([]);
 
-  const hasActiveFilters = filterSearch || filterStatus !== "all" || filterIndustries.length > 0 || filterLegalForms.length > 0 || filterCities.length > 0 || filterCountry !== "all";
+  const hasActiveFilters = filterSearch || filterStatus !== "all" || filterIndustries.length > 0 || filterLegalForms.length > 0 || filterCities.length > 0 || filterStates.length > 0 || filterCountry !== "all";
 
   function resetFilters() {
     setFilterSearch("");
@@ -139,6 +142,7 @@ export default function LeadScrapingPage() {
     setFilterIndustries([]);
     setFilterLegalForms([]);
     setFilterCities([]);
+    setFilterStates([]);
     setFilterCountry("all");
     setLeadsPage(1);
   }
@@ -195,19 +199,21 @@ export default function LeadScrapingPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterCountry]);
 
-  /* ── Branchen dynamisch nach Status neu laden ── */
+  /* ── Branchen dynamisch nach Status / Land / Bundesland neu laden ── */
   useEffect(() => {
     (async () => {
       try {
-        const url = filterStatus !== "all"
-          ? `/api/leads/industries?status=${filterStatus}`
-          : "/api/leads/industries";
-        const res = await fetch(url);
+        const params = new URLSearchParams();
+        if (filterStatus !== "all") params.set("status", filterStatus);
+        if (filterCountry !== "all") params.set("country", filterCountry);
+        if (filterStates.length > 0) params.set("state", filterStates.join(","));
+        const qs = params.toString();
+        const res = await fetch(`/api/leads/industries${qs ? `?${qs}` : ""}`);
         if (!res.ok) return;
         const json = await res.json();
         const dbValues = (json.data as string[]);
         // INDUSTRY_OPTIONS als Master-Liste + eventuelle DB-Werte die noch nicht in OPTIONS sind
-        const optionsSet = new Set(INDUSTRY_OPTIONS.map((o) => o.value));
+        const optionsSet = new Set<string>(INDUSTRY_OPTIONS.map((o) => o.value as string));
         const merged: { value: string; label: string }[] = [
           ...INDUSTRY_OPTIONS,
           ...dbValues.filter((v) => !optionsSet.has(v)).map((v) => ({ value: v, label: v })),
@@ -216,7 +222,7 @@ export default function LeadScrapingPage() {
       } catch { /* silent */ }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterStatus]);
+  }, [filterStatus, filterCountry, filterStates]);
 
   /* ── Data fetching ── */
   const fetchLeads = useCallback(async (page = 1) => {
@@ -228,6 +234,7 @@ export default function LeadScrapingPage() {
       if (filterIndustries.length > 0) params.set("industry", filterIndustries.join(","));
       if (filterLegalForms.length > 0) params.set("legal_form", filterLegalForms.join(","));
       if (filterCities.length > 0) params.set("city", filterCities.join(","));
+      if (filterStates.length > 0) params.set("state", filterStates.join(","));
       if (filterCountry !== "all") params.set("country", filterCountry);
       if (sorting.length > 0) {
         params.set("sort_by", sorting[0].id);
@@ -244,7 +251,7 @@ export default function LeadScrapingPage() {
     } finally {
       setLeadsLoading(false);
     }
-  }, [filterSearch, filterStatus, filterIndustries, filterLegalForms, filterCities, filterCountry, sorting, effectivePageSize]);
+  }, [filterSearch, filterStatus, filterIndustries, filterLegalForms, filterCities, filterStates, filterCountry, sorting, effectivePageSize]);
 
   const fetchJobs = useCallback(async () => {
     setJobsLoading(true);
@@ -272,7 +279,7 @@ export default function LeadScrapingPage() {
     setIsGlobalSelected(false);
     fetchLeads(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterStatus, filterIndustries, filterLegalForms, filterCities, filterCountry, sorting]);
+  }, [filterStatus, filterIndustries, filterLegalForms, filterCities, filterStates, filterCountry, sorting]);
 
   /* ── Debounced text-filter fetch (500ms, min 2 chars or empty) ── */
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -294,75 +301,95 @@ export default function LeadScrapingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterSearch]);
 
-  /* ── Polling + Stale-Job-Timeout ── */
-  const STALE_JOB_TIMEOUT_MS = 60 * 60 * 1000; // 60 Minuten — Pipeline kann bei großen Regionen lange dauern
-  const timedOutJobsRef = useRef<Set<string>>(new Set());
+  /* ── Supabase Realtime: Live-Updates für Search Jobs ──
+   * Ersetzt das 3-Sekunden-Polling. WebSocket-Verbindung zu Supabase bleibt
+   * auch bei Tab im Hintergrund aktiv → kein "Server reagiert nicht" mehr.
+   *
+   * Voraussetzung: Realtime für Tabelle "search_jobs" in Supabase aktivieren:
+   * Dashboard → Database → Replication → search_jobs → Realtime ON
+   */
+  const supabaseClient = useMemo(() => createBrowserClient(), []);
 
+  // Stabile Refs damit der Realtime-Callback keine stale Closures hat
+  const fetchLeadsRef = useRef(fetchLeads);
+  const fetchJobsRef  = useRef(fetchJobs);
+  const leadsPageRef  = useRef(leadsPage);
+  useEffect(() => { fetchLeadsRef.current = fetchLeads; }, [fetchLeads]);
+  useEffect(() => { fetchJobsRef.current  = fetchJobs;  }, [fetchJobs]);
+  useEffect(() => { leadsPageRef.current  = leadsPage;  }, [leadsPage]);
+
+  // Realtime-Subscription (einmal beim Mount, bleibt bis Unmount aktiv)
   useEffect(() => {
-    const activeJobs = searchJobs.filter(
-      (j) => j.status === "pending" || j.status === "running",
-    );
+    const channel = supabaseClient
+      .channel("search_jobs_realtime")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "search_jobs" },
+        (payload) => {
+          const updated = payload.new as SearchJob;
+          setSearchJobs((prev) => {
+            const idx = prev.findIndex((j) => j.id === updated.id);
+            if (idx === -1) return prev; // Nicht unsere Job-Liste
+
+            const prevJob = prev[idx];
+            // Status-Transition Toast (nur einmal)
+            if (updated.status === "completed" && prevJob.status !== "completed") {
+              toast.success(
+                `Suche "${updated.query} in ${updated.location}" abgeschlossen — ${updated.results_count} Ergebnisse`,
+              );
+              fetchLeadsRef.current(leadsPageRef.current);
+            } else if (updated.status === "failed" && prevJob.status !== "failed") {
+              toast.error(
+                `Suche "${updated.query}" fehlgeschlagen: ${(updated as any).error_message ?? "Fehler"}`,
+              );
+            }
+            return prev.map((j) => (j.id === updated.id ? { ...j, ...updated } : j));
+          });
+        },
+      )
+      .subscribe();
+
+    return () => { supabaseClient.removeChannel(channel); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supabaseClient]);
+
+  // Tab-Fokus Fallback: Jobs neu laden wenn der Tab wieder aktiv wird
+  useEffect(() => {
+    function onFocus() { fetchJobsRef.current(); }
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
+  // Stale-Timeout: letzter Fallback nach 2 Stunden (Realtime hat Vorrang)
+  const STALE_JOB_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+  const timedOutJobsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const activeJobs = searchJobs.filter((j) => j.status === "pending" || j.status === "running");
     if (activeJobs.length === 0) return;
 
-    const interval = setInterval(async () => {
-      let hasChanges = false;
+    const interval = setInterval(() => {
       const now = Date.now();
-      const updatedJobs = await Promise.all(
-        searchJobs.map(async (job) => {
+      setSearchJobs((prev) =>
+        prev.map((job) => {
           if (job.status !== "pending" && job.status !== "running") return job;
-
-          // Timeout nur einmal pro Job auslösen
-          const jobAge = now - new Date(job.created_at).getTime();
-          if (jobAge > STALE_JOB_TIMEOUT_MS && !timedOutJobsRef.current.has(job.id)) {
+          const age = now - new Date(job.created_at).getTime();
+          if (age > STALE_JOB_TIMEOUT_MS && !timedOutJobsRef.current.has(job.id)) {
             timedOutJobsRef.current.add(job.id);
-            hasChanges = true;
-            toast.error(
-              `Suche "${job.query}" abgebrochen — Zeitüberschreitung (Server nicht erreichbar)`,
-            );
+            toast.error(`Suche "${job.query}" abgebrochen — Zeitüberschreitung`);
             fetch(`/api/leads/search/${job.id}`, {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                status: "failed",
-                error_message: "Zeitüberschreitung — Server nicht erreichbar",
-              }),
+              body: JSON.stringify({ status: "failed", error_message: "Zeitüberschreitung" }),
             }).catch(() => {});
-            return {
-              ...job,
-              status: "failed" as const,
-              error_message: "Zeitüberschreitung — Server nicht erreichbar",
-            };
+            return { ...job, status: "failed" as const, error_message: "Zeitüberschreitung" };
           }
-
-          try {
-            const res = await fetch(`/api/leads/search/${job.id}`);
-            if (!res.ok) return job;
-            const json = await res.json();
-            const updated = json.data as SearchJob;
-            if (updated.status !== job.status || updated.results_count !== job.results_count) {
-              hasChanges = true;
-              if (updated.status === "completed") {
-                toast.success(
-                  `Suche "${job.query} in ${job.location}" abgeschlossen — ${updated.results_count} Ergebnisse`,
-                );
-              } else if (updated.status === "failed") {
-                toast.error(
-                  `Suche "${job.query}" fehlgeschlagen: ${updated.error_message ?? "Unbekannter Fehler"}`,
-                );
-              }
-            }
-            return updated;
-          } catch {
-            return job;
-          }
+          return job;
         }),
       );
-      setSearchJobs(updatedJobs);
-      if (hasChanges) fetchLeads(leadsPage);
-    }, 3000);
+    }, 60_000); // Nur jede Minute prüfen (nicht alle 3 Sekunden)
 
     return () => clearInterval(interval);
-  }, [searchJobs, fetchLeads, leadsPage]);
+  }, [searchJobs, STALE_JOB_TIMEOUT_MS]);
 
   /* ── Search submit (unterstützt mehrere Regionen gleichzeitig) ── */
   async function onSearchSubmit(values: SearchFormValues, source: SearchSource) {
@@ -458,6 +485,7 @@ export default function LeadScrapingPage() {
         industry: filterIndustries.length > 0 ? filterIndustries : undefined,
         legal_form: filterLegalForms.length > 0 ? filterLegalForms : undefined,
         city: filterCities.length > 0 ? filterCities : undefined,
+        state: filterStates.length > 0 ? filterStates : undefined,
         country: filterCountry === "all" ? undefined : filterCountry,
       };
     } else {
@@ -522,6 +550,7 @@ export default function LeadScrapingPage() {
           if (filterIndustries.length > 0) params.set("industry", filterIndustries.join(","));
           if (filterLegalForms.length > 0) params.set("legal_form", filterLegalForms.join(","));
           if (filterCities.length > 0) params.set("city", filterCities.join(","));
+          if (filterStates.length > 0) params.set("state", filterStates.join(","));
           if (filterCountry !== "all") params.set("country", filterCountry);
           const res = await fetch(`/api/leads?${params.toString()}`);
           if (!res.ok) throw new Error();
@@ -785,6 +814,17 @@ export default function LeadScrapingPage() {
 
                 <FilterCombobox
                   multi
+                  value={filterStates}
+                  onChange={setFilterStates}
+                  options={AT_BUNDESLAENDER}
+                  placeholder="Bundesland"
+                  searchPlaceholder="Bundesland suchen…"
+                  emptyText="Kein Bundesland gefunden"
+                  className="w-44 text-sm"
+                />
+
+                <FilterCombobox
+                  multi
                   value={filterCities}
                   onChange={setFilterCities}
                   options={cityOptions}
@@ -825,8 +865,25 @@ export default function LeadScrapingPage() {
               </div>
 
               {/* Zeile 3: Aktive Multi-Filter Chips */}
-              {(filterIndustries.length > 0 || filterCities.length > 0 || filterLegalForms.length > 0) && (
+              {(filterIndustries.length > 0 || filterCities.length > 0 || filterStates.length > 0 || filterLegalForms.length > 0) && (
                 <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                  {filterStates.map((st) => (
+                    <Badge
+                      key={st}
+                      variant="outline"
+                      className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1 pr-1 font-normal cursor-default"
+                    >
+                      <MapPin className="h-3 w-3 opacity-60" />
+                      {st}
+                      <button
+                        type="button"
+                        onClick={() => setFilterStates(filterStates.filter((v) => v !== st))}
+                        className="rounded-full hover:bg-emerald-100 p-0.5 transition-colors"
+                      >
+                        <X className="h-2.5 w-2.5" />
+                      </button>
+                    </Badge>
+                  ))}
                   {filterIndustries.map((ind) => (
                     <Badge
                       key={ind}
@@ -1013,6 +1070,7 @@ export default function LeadScrapingPage() {
           industry: filterIndustries.length > 0 ? filterIndustries : undefined,
           legal_form: filterLegalForms.length > 0 ? filterLegalForms : undefined,
           city: filterCities.length > 0 ? filterCities : undefined,
+          state: filterStates.length > 0 ? filterStates : undefined,
           country: filterCountry === "all" ? undefined : filterCountry,
         }}
         crmSettings={crmSettings}
@@ -1048,6 +1106,7 @@ export default function LeadScrapingPage() {
           industry: filterIndustries.length > 0 ? filterIndustries : undefined,
           legal_form: filterLegalForms.length > 0 ? filterLegalForms : undefined,
           city: filterCities.length > 0 ? filterCities : undefined,
+          state: filterStates.length > 0 ? filterStates : undefined,
           country: filterCountry === "all" ? undefined : filterCountry,
         }}
         onDeleted={handleDeleted}

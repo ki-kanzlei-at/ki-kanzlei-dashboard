@@ -16,7 +16,10 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status") || undefined;
-    const industries = await getDistinctIndustries(status);
+    const country = searchParams.get("country") || undefined;
+    const stateRaw = searchParams.get("state") || undefined;
+    const state = stateRaw ? stateRaw.split(",").filter(Boolean) : undefined;
+    const industries = await getDistinctIndustries({ status, country, state });
 
     return NextResponse.json({ data: industries });
   } catch (error) {

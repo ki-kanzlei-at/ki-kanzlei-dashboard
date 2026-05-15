@@ -102,13 +102,23 @@ export async function POST(request: NextRequest) {
 
 async function testHubSpot(apiKey: string): Promise<{ ok: boolean; error?: string }> {
   try {
+    console.log(`[HubSpot test] Token length=${apiKey.length}, starts="${apiKey.slice(0, 6)}…", ends="…${apiKey.slice(-4)}"`);
     const res = await fetch("https://api.hubapi.com/crm/v3/objects/contacts?limit=1", {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     if (res.ok) return { ok: true };
-    if (res.status === 401) return { ok: false, error: "Ungültiger API Key" };
-    if (res.status === 403) return { ok: false, error: "Fehlende Berechtigungen (Scopes prüfen)" };
     const body = await res.json().catch(() => null);
+    const msg = body?.message || "";
+    console.error(`[HubSpot test] ${res.status}: ${msg}`);
+    if (res.status === 401) {
+      return {
+        ok: false,
+        error: `Authentifizierung fehlgeschlagen (401): ${msg || "Token wird von HubSpot nicht erkannt"}. ` +
+          "Stelle sicher, dass du einen Private App Token (pat-eu1-/pat-na1-...) verwendest. " +
+          "Private Apps findest du unter: HubSpot Einstellungen → Integrationen → Private Apps.",
+      };
+    }
+    if (res.status === 403) return { ok: false, error: "Fehlende Berechtigungen — Scopes crm.objects.contacts.read + .write prüfen" };
     return { ok: false, error: body?.message || `HTTP ${res.status}` };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Netzwerkfehler" };

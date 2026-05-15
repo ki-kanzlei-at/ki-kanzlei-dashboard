@@ -37,6 +37,53 @@ interface GeminiInput {
   phones: string[];
 }
 
+// Modelle in Fallback-Reihenfolge: 2.5-flash zuerst, dann 2.0-flash als Backup
+const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"];
+const SYSTEM_INSTRUCTION = "Du bist ein Daten-Extraktions-Spezialist fuer oesterreichische und deutsche Unternehmen. Antworte IMMER mit validem JSON ohne Markdown-Bloecke. Fuer ceo_gender NUR: herr, frau, divers, unbekannt. NIEMALS maennlich/weiblich! Bei Ehepaaren: nimm EINE Person. Fuer industry: waehle EXAKT einen Wert aus der vorgegebenen Liste.";
+
+function is503(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as Record<string, unknown>;
+  return e["status"] === 503 || String(e["message"] ?? "").includes("503");
+}
+
+async function tryModel(
+  genAI: GoogleGenerativeAI,
+  modelName: string,
+  prompt: string,
+): Promise<GeminiExtractionResult | null> {
+  const MAX_RETRIES = 4;
+  // Backoff-Delays für 503: 3s, 8s, 20s, 45s
+  const DELAYS_503 = [3000, 8000, 20000, 45000];
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        systemInstruction: SYSTEM_INSTRUCTION,
+        generationConfig: { temperature: 0.1, responseMimeType: "application/json" },
+      });
+      const result = await model.generateContent(prompt);
+      return JSON.parse(result.response.text()) as GeminiExtractionResult;
+    } catch (err) {
+      if (attempt < MAX_RETRIES) {
+        const delay = is503(err) ? DELAYS_503[attempt] : 1000 * Math.pow(2, attempt);
+        console.warn(`[Gemini:${modelName}] Retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms (${is503(err) ? "503 overload" : "error"})`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      // Alle Retries aufgebraucht
+      if (is503(err)) {
+        console.warn(`[Gemini:${modelName}] Nach ${MAX_RETRIES} Retries aufgegeben (503 overload)`);
+      } else {
+        console.error(`[Gemini:${modelName}] Fehlgeschlagen:`, err);
+      }
+      return null;
+    }
+  }
+  return null;
+}
+
 export async function extractWithGemini(
   input: GeminiInput,
 ): Promise<GeminiExtractionResult | null> {
@@ -46,48 +93,31 @@ export async function extractWithGemini(
     return null;
   }
 
-  const MAX_RETRIES = 2;
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const prompt = buildPrompt(input);
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({
-        model: "gemini-2.5-flash",
-        systemInstruction: "Du bist ein Daten-Extraktions-Spezialist fuer oesterreichische und deutsche Unternehmen. Antworte IMMER mit validem JSON ohne Markdown-Bloecke. Fuer ceo_gender NUR: herr, frau, divers, unbekannt. NIEMALS maennlich/weiblich! Bei Ehepaaren: nimm EINE Person. Fuer industry: waehle EXAKT einen Wert aus der vorgegebenen Liste.",
-        generationConfig: {
-          temperature: 0.1,
-          responseMimeType: "application/json",
-        },
-      });
-
-      const prompt = buildPrompt(input);
-      const result = await model.generateContent(prompt);
-      const text = result.response.text();
-
-      const parsed = JSON.parse(text) as GeminiExtractionResult;
-
-      // Gender normalisieren (wie n8n)
+  for (const modelName of GEMINI_MODELS) {
+    const parsed = await tryModel(genAI, modelName, prompt);
+    if (parsed) {
+      if (modelName !== GEMINI_MODELS[0]) {
+        console.info(`[Gemini] Erfolg mit Fallback-Modell: ${modelName}`);
+      }
+      // Gender normalisieren
       parsed.ceo_gender = normalizeGender(parsed.ceo_gender);
-
-      // Branche normalisieren: ASCII-Keys → Label mit Umlauten
+      // Branche normalisieren
       parsed.industry = normalizeIndustry(parsed.industry);
-
       // Confidence Score validieren
       if (typeof parsed.confidence_score !== "number" || parsed.confidence_score < 0 || parsed.confidence_score > 1) {
         parsed.confidence_score = 0.5;
       }
-
       return parsed;
-    } catch (err) {
-      if (attempt < MAX_RETRIES) {
-        console.warn(`[Gemini] Retry ${attempt + 1}/${MAX_RETRIES} für "${input.companyName}"`);
-        await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
-        continue;
-      }
-      console.error("[Gemini] Extraktion fehlgeschlagen:", err);
-      return null;
+    }
+    if (modelName !== GEMINI_MODELS[GEMINI_MODELS.length - 1]) {
+      console.warn(`[Gemini] Wechsle zu Fallback-Modell nach Fehler mit ${modelName}`);
     }
   }
+
+  console.error(`[Gemini] Alle Modelle fehlgeschlagen für "${input.companyName}"`);
   return null;
 }
 

@@ -61,11 +61,24 @@ export const FIELD_MAPPINGS = {
   ],
 } as const;
 
+/** Strict email validation — must end with a known-length TLD (2-6 chars), no junk */
+function isValidEmail(email: string): boolean {
+  // Standard format: local@domain.tld — TLD 2-6 chars, no URL fragments or concatenated junk
+  if (!/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}$/.test(email)) return false;
+  // Reject if domain part contains "www" or looks like a URL got concatenated
+  const domain = email.split("@")[1];
+  if (/www\.|http/i.test(domain)) return false;
+  // Reject double-dots
+  if (email.includes("..")) return false;
+  return true;
+}
+
 export function mapLeadToHubSpot(lead: Lead): HubSpotContact {
   // Build properties and strip empty/null/undefined values —
   // HubSpot rejects batch requests when properties contain empty strings or invalid values
+  const emailClean = lead.email?.trim();
   const raw: Record<string, string | undefined> = {
-    email: lead.email ?? undefined,
+    email: emailClean && isValidEmail(emailClean) ? emailClean : undefined,
     firstname: lead.ceo_first_name ?? undefined,
     lastname: lead.ceo_last_name ?? lead.ceo_name ?? lead.company,
     company: lead.company,
