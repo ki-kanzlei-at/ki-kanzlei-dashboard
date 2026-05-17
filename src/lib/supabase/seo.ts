@@ -205,7 +205,7 @@ export async function getSeoPostStats(userId: string): Promise<SeoPostStats> {
   return stats;
 }
 
-/* ── Admin: Insert (for n8n webhook, bypasses RLS) ── */
+/* ── Admin: Insert (bypasses RLS) ── */
 
 export async function adminInsertSeoPost(post: SeoPostInsert): Promise<SeoPost> {
   const admin = getSupabaseAdmin();

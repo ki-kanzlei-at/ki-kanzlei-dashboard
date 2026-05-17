@@ -25,7 +25,7 @@ export interface GeminiExtractionResult {
   confidence_score: number;
 }
 
-interface GeminiInput {
+export interface GeminiInput {
   companyName: string;
   website: string;
   address: string;

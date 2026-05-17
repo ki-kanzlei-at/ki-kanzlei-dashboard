@@ -39,7 +39,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Eingeloggt + auf Login-Seite → zum Dashboard umleiten
+  // Eingeloggt + auf Login/Register-Seite → zum Dashboard umleiten
   // ABER: Bei Passwort-Recovery auf der Login-Seite bleiben lassen
   const isRecovery = searchParams.get("recovery") === "true";
   if (user && pathname === "/login" && !isRecovery) {
@@ -47,6 +47,26 @@ export async function middleware(request: NextRequest) {
     url.pathname = "/dashboard";
     return NextResponse.redirect(url);
   }
+  if (user && pathname === "/register") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/dashboard";
+    return NextResponse.redirect(url);
+  }
+
+  // Security Headers
+  supabaseResponse.headers.set("X-Frame-Options", "DENY");
+  supabaseResponse.headers.set("X-Content-Type-Options", "nosniff");
+  supabaseResponse.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  supabaseResponse.headers.set("X-XSS-Protection", "1; mode=block");
+  supabaseResponse.headers.set(
+    "Strict-Transport-Security",
+    "max-age=31536000; includeSubDomains",
+  );
+  supabaseResponse.headers.set(
+    "Content-Security-Policy",
+    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://*.supabase.co; frame-ancestors 'none';",
+  );
+  supabaseResponse.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
 
   return supabaseResponse;
 }

@@ -1,11 +1,12 @@
 /* ── Enrichment Pipeline ──
- * Ersetzt den n8n Workflow komplett (Lead Enrichment v11):
- * Google Places → Website Scraping + LangSearch CEO (parallel) → Gemini AI → Supabase Insert
+ * Lead Enrichment Pipeline:
+ * Google Places → Website Scraping → Gemini AI (mit Google Search Grounding) → Supabase Insert
  */
 
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { extractWithGemini, buildCeoName } from "./gemini";
 import { postalCodeToBundesland } from "@/lib/bundesland";
+import type { GeminiInput } from "./gemini";
 import type { LeadInsert } from "@/types/leads";
 
 /* ══════════════════════════════════════════════════════
@@ -125,7 +126,7 @@ const BLOCKED_EMAIL_DOMAINS = [
   "firmenabc.at",
 ];
 
-/** Substrings die irgendwo in der Email vorkommen → blockieren (wie n8n) */
+/** Substrings die irgendwo in der Email vorkommen → blockieren */
 const BLOCKED_EMAIL_SUBSTRINGS = [
   "wixpress", "sentry", "schema", "googletagmanager",
   "w3.org", "jquery", "bootstrap", "fontawesome",
@@ -162,7 +163,7 @@ function isValidEmail(email: string): boolean {
   // Exakte Domain oder Subdomain-Match (sentry-next.wixpress.com → wixpress.com blocked)
   if (BLOCKED_EMAIL_DOMAINS.some((bd) => domain === bd || domain.endsWith("." + bd))) return false;
 
-  // Substring-Match über die ganze Email (wie n8n)
+  // Substring-Match über die ganze Email
   if (BLOCKED_EMAIL_SUBSTRINGS.some((sub) => email.includes(sub))) return false;
 
   if (BLOCKED_EMAIL_PREFIXES.some((bp) => prefix.startsWith(bp))) return false;
@@ -332,8 +333,8 @@ export async function runEnrichmentPipeline(params: PipelineParams): Promise<voi
       timings.push(Date.now() - companyStart);
       await updateETA(jobId, resultsCount, processedCount, allPlaces.length, timings);
 
-      // Kleine Pause zwischen Firmen um LangSearch Rate-Limits zu vermeiden
-      if (i < allPlaces.length - 1) await sleep(500);
+      // Kleine Pause zwischen Firmen um API Rate-Limits zu vermeiden
+      if (i < allPlaces.length - 1) await sleep(300);
     }
 
     await updateJobStatus(jobId, "completed", {
@@ -547,76 +548,6 @@ async function fetchWebsiteData(baseUrl: string): Promise<WebsiteData> {
 }
 
 /* ══════════════════════════════════════════════════════
-   LangSearch: CEO / Geschäftsführer finden
-   ══════════════════════════════════════════════════════ */
-
-async function searchCEO(companyName: string, location: string): Promise<{
-  ceoName: string | null;
-  snippets: string;
-}> {
-  const apiKey = process.env.LANGSEARCH_API_KEY;
-  if (!apiKey) return { ceoName: null, snippets: "" };
-
-  const searchQuery = `${companyName} ${location} Geschäftsführer OR CEO OR Inhaber OR "managing director"`;
-  const MAX_RETRIES = 3;
-
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const response = await fetch("https://api.langsearch.com/v1/web-search", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          query: searchQuery,
-          freshness: "noLimit",
-          summary: true,
-          count: 10,
-        }),
-      });
-
-      if (response.status === 429) {
-        if (attempt < MAX_RETRIES) {
-          const waitMs = 2000 * Math.pow(2, attempt); // 2s, 4s, 8s
-          console.warn(`[LangSearch] 429 für "${companyName}" → Retry ${attempt + 1}/${MAX_RETRIES} in ${waitMs}ms`);
-          await sleep(waitMs);
-          continue;
-        }
-        console.warn(`[LangSearch] 429 für "${companyName}" → Alle Retries aufgebraucht`);
-        return { ceoName: null, snippets: "" };
-      }
-
-      if (!response.ok) {
-        console.warn(`[LangSearch] Fehler ${response.status} für "${companyName}"`);
-        return { ceoName: null, snippets: "" };
-      }
-
-      const data = await response.json();
-      const results: { name: string; snippet?: string; summary?: string }[] =
-        data.webPages?.value || [];
-
-      const snippets = results
-        .slice(0, 10)
-        .map((r) => `${r.name}: ${r.snippet || ""} ${r.summary || ""}`)
-        .join("\n");
-
-      return { ceoName: null, snippets }; // CEO-Extraktion komplett an Gemini delegieren
-    } catch (err) {
-      if (attempt < MAX_RETRIES) {
-        console.warn(`[LangSearch] Netzwerkfehler für "${companyName}" → Retry ${attempt + 1}/${MAX_RETRIES}`);
-        await sleep(2000 * Math.pow(2, attempt));
-        continue;
-      }
-      console.error(`[LangSearch] Fehler bei CEO-Suche:`, err);
-      return { ceoName: null, snippets: "" };
-    }
-  }
-
-  return { ceoName: null, snippets: "" };
-}
-
-/* ══════════════════════════════════════════════════════
    Enrich Single Place → LeadInsert
    ══════════════════════════════════════════════════════ */
 
@@ -631,33 +562,31 @@ async function enrichAndBuildLead(
   const companyName = place.displayName?.text || "";
   const website = (place.websiteUri || "").replace(/\/$/, "");
 
-  // Parallel: Website scrapen + CEO suchen (wie n8n Nodes 7a + 8)
-  // Beide mit Fehler-Fallback damit ein Fehler nicht den ganzen Lead killt
-  const [websiteData, ceoData] = await Promise.all([
-    website
-      ? fetchWebsiteData(website).catch((err) => {
-          console.warn(`[Pipeline] Website-Scraping fehlgeschlagen für ${website}:`, err instanceof Error ? err.message : err);
-          return null;
-        })
-      : Promise.resolve(null),
-    searchCEO(companyName, location),
-  ]);
+  // Website scrapen (CEO-Suche macht jetzt Gemini via Google Search Grounding)
+  const websiteData = website
+    ? await fetchWebsiteData(website).catch((err) => {
+        console.warn(`[Pipeline] Website-Scraping fehlgeschlagen für ${website}:`, err instanceof Error ? err.message : err);
+        return null;
+      })
+    : null;
 
   // Valide Emails aus Scraping
   const validEmails = (websiteData?.emails || []).map(sanitizeEmail).filter(isValidEmail);
 
-  // Gemini AI Extraktion (bekommt alle Rohdaten)
-  const aiResult = await extractWithGemini({
+  // Gemini AI Extraktion mit Google Search Grounding
+  // Gemini sucht selbst bei Google nach dem Geschäftsführer
+  const geminiInput: GeminiInput = {
     companyName,
     website,
     address: place.formattedAddress || "",
     phone: place.internationalPhoneNumber || place.nationalPhoneNumber || null,
     pagesLoaded: websiteData?.pagesLoaded || [],
     websiteContent: websiteData?.websiteContent || "",
-    ceoSnippets: ceoData.snippets,
+    ceoSnippets: "",
     emails: validEmails,
     phones: websiteData?.phones || [],
-  });
+  };
+  const aiResult = await extractWithGemini(geminiInput);
 
   // Email: Gemini's Vorschlag prüfen, dann Fallback auf eigene Logik
   let bestEmail: string | null = null;
@@ -669,7 +598,7 @@ async function enrichAndBuildLead(
     bestEmail = selectBestEmail(websiteData?.emails || [], website);
   }
 
-  // Keine valide Email → skip (wie n8n)
+  // Keine valide Email → skip
   if (!bestEmail) return null;
 
   // Phone: Gemini's Vorschlag oder Google Places
@@ -679,7 +608,7 @@ async function enrichAndBuildLead(
     place.nationalPhoneNumber ||
     (websiteData?.phones?.[0] || null);
 
-  // CEO Name zusammenbauen (wie n8n "11. Prepare Lead")
+  // CEO Name zusammenbauen
   const ceoName = aiResult ? buildCeoName(aiResult) : null;
 
   // Adresse: Gemini oder Fallback
@@ -734,7 +663,6 @@ async function enrichAndBuildLead(
       emails_found: validEmails,
       phones_found: websiteData?.phones || [],
       pages_loaded: websiteData?.pagesLoaded || [],
-      ceo_search_snippets: ceoData.snippets,
       website_content_preview: websiteData?.websiteContent?.substring(0, 500) || null,
       confidence_score: aiResult?.confidence_score ?? null,
       ai_extraction: !!aiResult,

@@ -138,23 +138,6 @@ export function Sidebar() {
                 />
             </nav>
 
-            {/* ── Status Footer ── */}
-            <div className="p-4 border-t border-white/40 flex-shrink-0">
-                <div className="flex items-center gap-2.5 rounded-lg border border-emerald-200/70 bg-emerald-50/80 px-3 py-2.5">
-                    <span className="relative flex h-2 w-2 flex-shrink-0">
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-                        <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                    </span>
-                    <div className="min-w-0">
-                        <p className="text-[11px] font-semibold leading-none text-emerald-800">
-                            n8n Backend Online
-                        </p>
-                        <p className="mt-0.5 text-[10px] leading-none text-emerald-600/75">
-                            Alle Workflows aktiv
-                        </p>
-                    </div>
-                </div>
-            </div>
         </aside>
     );
 }

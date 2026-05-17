@@ -1,6 +1,6 @@
 /* ── API Route: /api/seo/posts ── */
 /* GET  = Dashboard (authenticated user)
-   POST = n8n Webhook (CRON_SECRET auth) */
+   POST = Admin (CRON_SECRET auth) */
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";

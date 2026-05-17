@@ -256,9 +256,6 @@ export default function SeoPage() {
             Automatisch erstellte Blog-Posts im Überblick
           </p>
         </div>
-        <Badge variant="secondary" className="text-[10px] font-semibold uppercase tracking-wide">
-          n8n Automation
-        </Badge>
       </div>
 
       {/* ── Stats Cards ── */}

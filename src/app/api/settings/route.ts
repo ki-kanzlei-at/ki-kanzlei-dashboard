@@ -90,7 +90,6 @@ export async function PATCH(request: NextRequest) {
     }
 
     const settings = await upsertUserSettings(user.id, {
-      n8n_webhook_url: sanitizeUrl(body.n8n_webhook_url),
       gemini_api_key: sanitizeString(body.gemini_api_key, 512),
       hubspot_api_key: sanitizeString(body.hubspot_api_key, 512),
       pipedrive_api_key: sanitizeString(body.pipedrive_api_key, 512),

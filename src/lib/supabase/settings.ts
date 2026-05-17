@@ -81,7 +81,6 @@ export interface BrandSettings {
 
 export interface UserSettings {
   user_id: string;
-  n8n_webhook_url: string | null;
   gemini_api_key: string | null;
   /* CRM-Export */
   hubspot_api_key: string | null;
@@ -116,7 +115,6 @@ export interface UserSettings {
 
 export type UserSettingsUpdate = Partial<
   Pick<UserSettings,
-    | "n8n_webhook_url"
     | "gemini_api_key"
     | "anthropic_api_key"
     | "hubspot_api_key"

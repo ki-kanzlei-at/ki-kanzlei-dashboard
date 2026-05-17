@@ -34,9 +34,9 @@ export interface Lead {
 
   /* Basisdaten */
   name: string | null;
-  /** Von Dashboard/API befüllt — n8n-Sync via DB-Trigger aus company_name */
+  /** Von Dashboard/API befüllt — Sync via DB-Trigger aus company_name */
   company: string;
-  /** Von n8n AI-Extraktion befüllt — Sync via DB-Trigger nach company */
+  /** Von AI-Extraktion befüllt — Sync via DB-Trigger nach company */
   company_name: string | null;
   email: string | null;
   phone: string | null;
@@ -44,7 +44,7 @@ export interface Lead {
 
   /* Standort */
   address: string | null;
-  /** Straße + Hausnummer aus AI-Extraktion (n8n-Feldname: street) */
+  /** Straße + Hausnummer aus AI-Extraktion */
   street: string | null;
   city: string | null;
   postal_code: string | null;
@@ -113,7 +113,7 @@ export type LeadUpdate = Partial<Pick<Lead,
   | "social_xing" | "social_twitter" | "social_youtube" | "social_tiktok"
 >>;
 
-/* Normalisierte Branchenliste (exakter n8n AI-Output als value, Anzeige als label) */
+/* Normalisierte Branchenliste (AI-Output als value, Anzeige als label) */
 export const INDUSTRY_OPTIONS = [
   { value: "Rechtsanwalt",          label: "Rechtsanwalt" },
   { value: "Kanzlei",               label: "Kanzlei" },
@@ -308,7 +308,7 @@ export type SearchJobInsert = Omit<SearchJob, "id" | "created_at" | "updated_at"
   radius_km?: number;
 };
 
-/* ── Länder-Mapping (n8n liefert ISO-Codes, Frontend zeigt ausgeschrieben) ── */
+/* ── Länder-Mapping (ISO-Codes → Anzeigename) ── */
 export const COUNTRY_MAP: Record<string, string> = {
   AT: "Österreich",
   DE: "Deutschland",

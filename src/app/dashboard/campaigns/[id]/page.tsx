@@ -161,22 +161,13 @@ export default function CampaignDetailPage() {
 
   async function handleStatusChange(status: CampaignStatus) {
     try {
-      if (status === "active") {
-        const res = await fetch(`/api/campaigns/${id}/trigger`, { method: "POST" });
-        if (!res.ok) {
-          const data = await res.json().catch(() => null);
-          throw new Error(data?.error ?? "Fehler beim Starten");
-        }
-        toast.success("Kampagne gestartet");
-      } else {
-        const res = await fetch(`/api/campaigns/${id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status }),
-        });
-        if (!res.ok) throw new Error();
-        toast.success(`Status auf "${STATUS_CONFIG[status].label}" geändert`);
-      }
+      const res = await fetch(`/api/campaigns/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success(status === "active" ? "Kampagne gestartet" : `Status auf "${STATUS_CONFIG[status].label}" geändert`);
       fetchCampaign();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Fehler");

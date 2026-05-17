@@ -200,7 +200,7 @@ export function CrmExportDialog({
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <Globe className="h-4 w-4 text-muted-foreground" />
-                <p className="text-sm font-medium">Webhook (Zapier / Make / n8n)</p>
+                <p className="text-sm font-medium">Webhook (Zapier / Make)</p>
               </div>
 
               {crmSettings.webhook_url ? (
