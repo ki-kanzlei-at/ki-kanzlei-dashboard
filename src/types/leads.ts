@@ -17,6 +17,8 @@ export interface LeadFilters {
   search?: string;
   /** ID-basierter Filter für CRM-Export */
   ids?: string[];
+  /** Filter auf alle Leads aus einem konkreten Suchauftrag */
+  search_job_id?: string;
 }
 
 export interface SortOptions {
@@ -51,12 +53,10 @@ export interface Lead {
   /** Bundesland / Kanton / State — aus PLZ abgeleitet oder manuell gesetzt */
   state: string | null;
   country: string;
-  category: string | null;
   industry: string | null;
 
   /* Firmendaten */
   legal_form: string | null;
-  employee_count: number | null;
 
   /* Ansprechpartner */
   ceo_name: string | null;
@@ -71,11 +71,10 @@ export interface Lead {
   google_rating: number | null;
   google_reviews_count: number | null;
 
-  /* Social Media */
+  /* Social Media (für B2B-Outreach in DACH) */
   social_linkedin: string | null;
   social_facebook: string | null;
   social_instagram: string | null;
-  social_xing: string | null;
   social_twitter: string | null;
   social_youtube: string | null;
   social_tiktok: string | null;
@@ -106,176 +105,170 @@ export type LeadInsert = Omit<Lead, "id" | "created_at" | "updated_at" | "state"
 export type LeadUpdate = Partial<Pick<Lead,
   | "company" | "company_name" | "name" | "email" | "phone" | "website"
   | "address" | "street" | "city" | "postal_code" | "state" | "country"
-  | "category" | "industry" | "legal_form" | "employee_count"
+  | "industry" | "legal_form"
   | "ceo_name" | "ceo_title" | "ceo_first_name" | "ceo_last_name" | "ceo_gender" | "ceo_source"
   | "status" | "notes"
   | "social_linkedin" | "social_facebook" | "social_instagram"
-  | "social_xing" | "social_twitter" | "social_youtube" | "social_tiktok"
+  | "social_twitter" | "social_youtube" | "social_tiktok"
 >>;
 
-/* Normalisierte Branchenliste (AI-Output als value, Anzeige als label) */
+/* Normalisierte Branchenliste — konsolidiert auf ~55 brauchbare Kategorien.
+ * Frühere Sub-Branchen (10 Fachärzte, 14 Handwerks-Subs etc.) sind zusammengefasst.
+ * AI-Output und UI-Filter nutzen diese Liste exklusiv. */
 export const INDUSTRY_OPTIONS = [
+  /* ── Recht & Steuern ── */
   { value: "Rechtsanwalt",          label: "Rechtsanwalt" },
-  { value: "Kanzlei",               label: "Kanzlei" },
-  { value: "Steuerberater",         label: "Steuerberater" },
-  { value: "Personalverrechnung",   label: "Personalverrechnung" },
-  { value: "Buchhaltung",           label: "Buchhaltung" },
-  { value: "Wirtschaftsprüfer",     label: "Wirtschaftsprüfer" },
   { value: "Notar",                 label: "Notar" },
-  { value: "Patentanwalt",          label: "Patentanwalt" },
-  { value: "Arzt",                  label: "Arzt" },
-  { value: "Hausarzt",              label: "Hausarzt" },
-  { value: "Internist",             label: "Internist" },
+  { value: "Steuerberater",         label: "Steuerberater" },
+  { value: "Wirtschaftsprüfer",     label: "Wirtschaftsprüfer" },
+  { value: "Buchhaltung",           label: "Buchhaltung" },
+
+  /* ── Gesundheit & Praxis ── */
+  { value: "Arzt",                  label: "Arzt (Allgemein)" },
   { value: "Facharzt",              label: "Facharzt" },
-  { value: "Orthopäde",             label: "Orthopäde" },
-  { value: "Augenarzt",             label: "Augenarzt" },
-  { value: "Hautarzt",              label: "Hautarzt" },
-  { value: "Kinderarzt",            label: "Kinderarzt" },
-  { value: "Gynäkologe",            label: "Gynäkologe" },
-  { value: "HNO-Arzt",              label: "HNO-Arzt" },
-  { value: "Kardiologe",            label: "Kardiologe" },
   { value: "Zahnarzt",              label: "Zahnarzt" },
-  { value: "Zahntechniker",         label: "Zahntechniker" },
   { value: "Tierarzt",              label: "Tierarzt" },
   { value: "Apotheke",              label: "Apotheke" },
   { value: "Physiotherapie",        label: "Physiotherapie" },
-  { value: "Heilpraktiker",         label: "Heilpraktiker" },
   { value: "Psychotherapie",        label: "Psychotherapie" },
-  { value: "Psychologie",           label: "Psychologie" },
+  { value: "Heilpraktiker",         label: "Heilpraktiker" },
+
+  /* ── Klinik & Pflege ── */
   { value: "Krankenhaus",           label: "Krankenhaus" },
   { value: "Pflegeheim",            label: "Pflegeheim" },
   { value: "Pflegedienst",          label: "Pflegedienst" },
-  { value: "Labor",                 label: "Labor" },
   { value: "Medizintechnik",        label: "Medizintechnik" },
+  { value: "Optiker",               label: "Optiker" },
+
+  /* ── Immobilien ── */
   { value: "Immobilienmakler",      label: "Immobilienmakler" },
   { value: "Hausverwaltung",        label: "Hausverwaltung" },
   { value: "Bauträger",             label: "Bauträger" },
+
+  /* ── Planung & Bau ── */
   { value: "Architekt",             label: "Architekt" },
-  { value: "Innenarchitekt",        label: "Innenarchitekt" },
-  { value: "Gutachter",             label: "Gutachter" },
   { value: "Ingenieurbüro",         label: "Ingenieurbüro" },
-  { value: "Vermessungsbüro",       label: "Vermessungsbüro" },
+  { value: "Gutachter",             label: "Gutachter" },
   { value: "Bauunternehmen",        label: "Bauunternehmen" },
+
+  /* ── Handwerk ── */
   { value: "Handwerksbetrieb",      label: "Handwerksbetrieb" },
   { value: "Elektrotechnik",        label: "Elektrotechnik" },
   { value: "Sanitär",               label: "Sanitär" },
   { value: "Heizung",               label: "Heizung" },
   { value: "Klimatechnik",          label: "Klimatechnik" },
   { value: "Installateur",          label: "Installateur" },
+  { value: "Schreinerei",           label: "Schreinerei / Tischlerei" },
+  { value: "Schlosserei",           label: "Schlosserei / Metallbau" },
+  { value: "Dachdeckerei",          label: "Dachdeckerei / Zimmerei" },
   { value: "Malerbetrieb",          label: "Malerbetrieb" },
-  { value: "Bodenleger",            label: "Bodenleger" },
-  { value: "Tischlerei",            label: "Tischlerei" },
-  { value: "Schreinerei",           label: "Schreinerei" },
-  { value: "Schlosserei",           label: "Schlosserei" },
-  { value: "Dachdeckerei",          label: "Dachdeckerei" },
-  { value: "Zimmerei",              label: "Zimmerei" },
+  { value: "Bodenleger",            label: "Bodenleger / Fliesenleger" },
   { value: "Glaserei",              label: "Glaserei" },
-  { value: "Fliesenleger",          label: "Fliesenleger" },
-  { value: "Gerüstbau",             label: "Gerüstbau" },
-  { value: "Metallbau",             label: "Metallbau" },
-  { value: "Schornsteinfeger",      label: "Schornsteinfeger" },
-  { value: "Gebäudetechnik",        label: "Gebäudetechnik" },
+
+  /* ── Auto & Verkehr ── */
   { value: "KFZ-Werkstatt",         label: "KFZ-Werkstatt" },
-  { value: "Autohandel",            label: "Autohandel" },
-  { value: "Autohaus",              label: "Autohaus" },
+  { value: "Autohaus",              label: "Autohaus / Autohandel" },
   { value: "Tankstelle",            label: "Tankstelle" },
+
+  /* ── Logistik ── */
+  { value: "Spedition",             label: "Spedition / Logistik" },
+  { value: "Kurierdienst",          label: "Kurierdienst" },
+  { value: "Umzugsunternehmen",     label: "Umzugsunternehmen" },
+
+  /* ── Hospitality & Gastronomie ── */
   { value: "Hotel",                 label: "Hotel" },
   { value: "Pension",               label: "Pension" },
   { value: "Campingplatz",          label: "Campingplatz" },
-  { value: "Ferienhaus",            label: "Ferienhaus" },
+  { value: "Ferienhaus",            label: "Ferienhaus / Ferienwohnung" },
   { value: "Tourismus",             label: "Tourismus" },
+  { value: "Reisebüro",             label: "Reisebüro" },
   { value: "Restaurant",            label: "Restaurant" },
   { value: "Café",                  label: "Café" },
+  { value: "Catering",              label: "Catering" },
   { value: "Bäckerei",              label: "Bäckerei" },
   { value: "Metzgerei",             label: "Metzgerei" },
-  { value: "Catering",              label: "Catering" },
-  { value: "Imbiss",                label: "Imbiss" },
-  { value: "Weingut",               label: "Weingut" },
-  { value: "Brauerei",              label: "Brauerei" },
+  { value: "Weingut",               label: "Weingut / Brauerei" },
+
+  /* ── Handel ── */
   { value: "Einzelhandel",          label: "Einzelhandel" },
-  { value: "Supermarkt",            label: "Supermarkt" },
+  { value: "Großhandel",            label: "Großhandel" },
+  { value: "E-Commerce",            label: "E-Commerce" },
   { value: "Modegeschäft",          label: "Modegeschäft" },
+  { value: "Supermarkt",            label: "Supermarkt" },
   { value: "Juwelier",              label: "Juwelier" },
   { value: "Buchhandlung",          label: "Buchhandlung" },
-  { value: "Großhandel",            label: "Großhandel" },
-  { value: "Vertrieb",              label: "Vertrieb" },
-  { value: "Import-Export",         label: "Import-Export" },
-  { value: "E-Commerce",            label: "E-Commerce" },
+  { value: "Vertrieb",              label: "Vertrieb / Import-Export" },
+
+  /* ── IT & Digital ── */
   { value: "IT-Dienstleister",      label: "IT-Dienstleister" },
   { value: "Softwareentwicklung",   label: "Softwareentwicklung" },
-  { value: "Coworking",             label: "Coworking" },
-  { value: "Technologiepark",       label: "Technologiepark" },
-  { value: "Webdesign",             label: "Webdesign" },
-  { value: "Webagentur",            label: "Webagentur" },
-  { value: "Marketingagentur",      label: "Marketingagentur" },
+  { value: "Hosting",               label: "Hosting / Rechenzentrum" },
+  { value: "Telekommunikation",     label: "Telekommunikation" },
+
+  /* ── Marketing & Medien ── */
   { value: "Werbeagentur",          label: "Werbeagentur" },
+  { value: "Marketingagentur",      label: "Marketingagentur" },
+  { value: "Webagentur",            label: "Webagentur / Webdesign" },
   { value: "PR-Agentur",            label: "PR-Agentur" },
-  { value: "Medien",                label: "Medien" },
-  { value: "Unternehmensberatung",  label: "Unternehmensberatung" },
-  { value: "Wirtschaftsberatung",   label: "Wirtschaftsberatung" },
-  { value: "Versicherungsmakler",   label: "Versicherungsmakler" },
-  { value: "Finanzberater",         label: "Finanzberater" },
-  { value: "Bank",                  label: "Bank" },
-  { value: "Vermögensverwaltung",   label: "Vermögensverwaltung" },
-  { value: "Versicherung",          label: "Versicherung" },
-  { value: "Inkasso",               label: "Inkasso" },
-  { value: "Treuhand",              label: "Treuhand" },
-  { value: "Leasing",               label: "Leasing" },
-  { value: "Fitnessstudio",         label: "Fitnessstudio" },
-  { value: "Sportverein",           label: "Sportverein" },
-  { value: "Wellnesscenter",        label: "Wellnesscenter" },
-  { value: "Friseur",               label: "Friseur" },
-  { value: "Kosmetikstudio",        label: "Kosmetikstudio" },
-  { value: "Beautysalon",           label: "Beautysalon" },
-  { value: "Nagelstudio",           label: "Nagelstudio" },
-  { value: "Tattoo-Studio",         label: "Tattoo-Studio" },
-  { value: "Fahrschule",            label: "Fahrschule" },
-  { value: "Nachhilfe",             label: "Nachhilfe" },
-  { value: "Sprachschule",          label: "Sprachschule" },
-  { value: "Musikschule",           label: "Musikschule" },
-  { value: "Kindergarten",          label: "Kindergarten" },
-  { value: "Tanzschule",            label: "Tanzschule" },
-  { value: "Coaching",              label: "Coaching" },
-  { value: "Fotograf",              label: "Fotograf" },
-  { value: "Videoproduktion",       label: "Videoproduktion" },
   { value: "Grafikdesign",          label: "Grafikdesign" },
-  { value: "Tonstudio",             label: "Tonstudio" },
   { value: "Druckerei",             label: "Druckerei" },
   { value: "Werbetechnik",          label: "Werbetechnik" },
+  { value: "Fotograf",              label: "Fotograf" },
+  { value: "Videoproduktion",       label: "Videoproduktion / Tonstudio" },
+  { value: "Medien",                label: "Medien / Verlag" },
+
+  /* ── Beratung & Personal ── */
+  { value: "Unternehmensberatung",  label: "Unternehmensberatung" },
+  { value: "Wirtschaftsberatung",   label: "Wirtschaftsberatung" },
+  { value: "Coaching",              label: "Coaching" },
+  { value: "Personalvermittlung",   label: "Personalvermittlung" },
+  { value: "Personalberatung",      label: "Personalberatung" },
+
+  /* ── Finanzen ── */
+  { value: "Bank",                  label: "Bank" },
+  { value: "Versicherung",          label: "Versicherung" },
+  { value: "Versicherungsmakler",   label: "Versicherungsmakler" },
+  { value: "Finanzberater",         label: "Finanzberater" },
+  { value: "Vermögensverwaltung",   label: "Vermögensverwaltung" },
+  { value: "Leasing",               label: "Leasing / Inkasso" },
+
+  /* ── Beauty & Wellness ── */
+  { value: "Friseur",               label: "Friseur" },
+  { value: "Kosmetikstudio",        label: "Kosmetikstudio" },
+  { value: "Wellnesscenter",        label: "Wellness / Spa" },
+  { value: "Nagelstudio",           label: "Nagelstudio" },
+  { value: "Tattoo-Studio",         label: "Tattoo-Studio" },
+
+  /* ── Sport ── */
+  { value: "Fitnessstudio",         label: "Fitnessstudio" },
+  { value: "Sportverein",           label: "Sportverein" },
+  { value: "Tanzschule",            label: "Tanzschule" },
+
+  /* ── Bildung ── */
+  { value: "Fahrschule",            label: "Fahrschule" },
+  { value: "Sprachschule",          label: "Sprachschule / Nachhilfe" },
+  { value: "Musikschule",           label: "Musikschule" },
+  { value: "Kindergarten",          label: "Kindergarten" },
+
+  /* ── Service ── */
   { value: "Reinigungsfirma",       label: "Reinigungsfirma" },
   { value: "Facility Management",   label: "Facility Management" },
-  { value: "Gebäudeservice",        label: "Gebäudeservice" },
-  { value: "Spedition",             label: "Spedition" },
-  { value: "Logistik",              label: "Logistik" },
-  { value: "Transportunternehmen",  label: "Transportunternehmen" },
-  { value: "Kurierdienst",          label: "Kurierdienst" },
-  { value: "Umzugsunternehmen",     label: "Umzugsunternehmen" },
-  { value: "Gartenbau",             label: "Gartenbau" },
-  { value: "Landschaftspflege",     label: "Landschaftspflege" },
+  { value: "Sicherheitsdienst",     label: "Sicherheitsdienst" },
+  { value: "Eventmanagement",       label: "Eventmanagement" },
+  { value: "Bestattung",            label: "Bestattung" },
+
+  /* ── Garten & Landwirtschaft ── */
+  { value: "Gartenbau",             label: "Gartenbau / Landschaftspflege" },
   { value: "Floristik",             label: "Floristik" },
   { value: "Landwirtschaft",        label: "Landwirtschaft" },
-  { value: "Bestattung",            label: "Bestattung" },
-  { value: "Optiker",               label: "Optiker" },
-  { value: "Hörgeräteakustiker",    label: "Hörgeräteakustiker" },
-  { value: "Personalvermittlung",   label: "Personalvermittlung" },
-  { value: "Zeitarbeit",            label: "Zeitarbeit" },
-  { value: "Personalberatung",      label: "Personalberatung" },
-  { value: "Sicherheitsdienst",     label: "Sicherheitsdienst" },
-  { value: "Detektei",              label: "Detektei" },
-  { value: "Eventmanagement",       label: "Eventmanagement" },
-  { value: "Veranstaltungstechnik", label: "Veranstaltungstechnik" },
-  { value: "Reisebüro",             label: "Reisebüro" },
-  { value: "Tierhandlung",          label: "Tierhandlung" },
-  { value: "Hundeschule",           label: "Hundeschule" },
-  { value: "Rechenzentrum",         label: "Rechenzentrum" },
-  { value: "Hosting",               label: "Hosting" },
-  { value: "Telekommunikation",     label: "Telekommunikation" },
+
+  /* ── Energie & Umwelt ── */
   { value: "Energieversorger",      label: "Energieversorger" },
-  { value: "Photovoltaik",          label: "Photovoltaik" },
+  { value: "Photovoltaik",          label: "Photovoltaik / Wärmepumpe" },
   { value: "Energieberatung",       label: "Energieberatung" },
-  { value: "Wärmepumpe",            label: "Wärmepumpe" },
-  { value: "Abfallentsorgung",      label: "Abfallentsorgung" },
-  { value: "Recycling",             label: "Recycling" },
+  { value: "Recycling",             label: "Recycling / Abfallentsorgung" },
+
+  /* ── Fallback ── */
   { value: "Sonstige",              label: "Sonstige" },
 ] as const;
 
@@ -338,15 +331,34 @@ export const COUNTRY_OPTIONS = Object.entries(COUNTRY_MAP).map(([value, label]) 
   label,
 }));
 
-/* Rechtsform-Filter */
+/* Rechtsform-Filter — offizielle Rechtsformen für AT, DE, CH (DACH) */
 export const COMPANY_TYPE_OPTIONS = [
-  { value: "all", label: "Alle Rechtsformen" },
-  { value: "gmbh", label: "GmbH" },
-  { value: "eu", label: "Einzelunternehmen (e.U.)" },
-  { value: "ag", label: "AG" },
-  { value: "og", label: "OG" },
-  { value: "kg", label: "KG" },
-  { value: "gmbh_cokg", label: "GmbH & Co KG" },
+  { value: "all",        label: "Alle Rechtsformen" },
+  /* AT + DE + CH gemeinsam */
+  { value: "gmbh",       label: "GmbH" },
+  { value: "ag",         label: "AG" },
+  { value: "kg",         label: "KG" },
+  { value: "gmbh_cokg",  label: "GmbH & Co KG" },
+  { value: "eu",         label: "Einzelunternehmen (e.U.)" },
+  { value: "se",         label: "SE — Societas Europaea" },
+  { value: "genossenschaft", label: "Genossenschaft" },
+  { value: "stiftung",   label: "Stiftung" },
+  /* AT-spezifisch */
+  { value: "og",         label: "OG (Offene Gesellschaft)" },
+  { value: "flexco",     label: "FlexCo (Flexible Kapitalgesellschaft)" },
+  /* DE-spezifisch */
+  { value: "ug",         label: "UG (haftungsbeschränkt)" },
+  { value: "ohg",        label: "OHG (Offene Handelsgesellschaft)" },
+  { value: "gbr",        label: "GbR (Gesellschaft bürgerlichen Rechts)" },
+  { value: "kgaa",       label: "KGaA" },
+  { value: "partg",      label: "PartG (Partnerschaftsgesellschaft)" },
+  { value: "partgmbb",   label: "PartG mbB" },
+  { value: "ev",         label: "e.V. (eingetragener Verein)" },
+  /* CH-spezifisch */
+  { value: "klg",        label: "KlG (Kollektivgesellschaft)" },
+  { value: "kmg",        label: "KmG (Kommanditgesellschaft, CH)" },
+  { value: "kmag",       label: "KmAG (Kommandit-AG)" },
+  { value: "verein",     label: "Verein" },
 ] as const;
 
 /* Bundesländer (Österreich) */

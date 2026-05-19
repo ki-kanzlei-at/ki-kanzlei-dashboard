@@ -4,6 +4,7 @@
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { INDUSTRY_OPTIONS } from "@/types/leads";
+import { geminiSemaphore } from "./semaphore";
 
 const INDUSTRY_LIST = INDUSTRY_OPTIONS.map((o) => o.label).join(" | ");
 
@@ -32,13 +33,11 @@ export interface GeminiInput {
   phone: string | null;
   pagesLoaded: string[];
   websiteContent: string;
-  ceoSnippets: string;
   emails: string[];
   phones: string[];
 }
 
-// Modelle in Fallback-Reihenfolge: 2.5-flash zuerst, dann 2.0-flash als Backup
-const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"];
+const GEMINI_MODEL = "gemini-2.5-flash";
 const SYSTEM_INSTRUCTION = "Du bist ein Daten-Extraktions-Spezialist fuer oesterreichische und deutsche Unternehmen. Antworte IMMER mit validem JSON ohne Markdown-Bloecke. Fuer ceo_gender NUR: herr, frau, divers, unbekannt. NIEMALS maennlich/weiblich! Bei Ehepaaren: nimm EINE Person. Fuer industry: waehle EXAKT einen Wert aus der vorgegebenen Liste.";
 
 function is503(err: unknown): boolean {
@@ -47,45 +46,95 @@ function is503(err: unknown): boolean {
   return e["status"] === 503 || String(e["message"] ?? "").includes("503");
 }
 
-async function tryModel(
+/** Extract JSON from Gemini text response (grounding mode doesn't support responseMimeType) */
+function parseJsonFromText(text: string): unknown {
+  // Try direct parse first
+  try { return JSON.parse(text); } catch { /* continue */ }
+  // Extract from markdown code block
+  const match = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (match) {
+    try { return JSON.parse(match[1].trim()); } catch { /* continue */ }
+  }
+  // Try to find first { ... } block
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start !== -1 && end > start) {
+    try { return JSON.parse(text.substring(start, end + 1)); } catch { /* continue */ }
+  }
+  return null;
+}
+
+/** Einzelner Gemini-Call mit Retry-Logik */
+async function callGemini(
   genAI: GoogleGenerativeAI,
-  modelName: string,
   prompt: string,
+  useGrounding: boolean,
 ): Promise<GeminiExtractionResult | null> {
-  const MAX_RETRIES = 4;
-  // Backoff-Delays für 503: 3s, 8s, 20s, 45s
-  const DELAYS_503 = [3000, 8000, 20000, 45000];
+  const MAX_RETRIES = 3;
+  const DELAYS = [2000, 5000, 15000];
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const model = genAI.getGenerativeModel({
-        model: modelName,
+      const modelConfig: Record<string, unknown> = {
+        model: GEMINI_MODEL,
         systemInstruction: SYSTEM_INSTRUCTION,
-        generationConfig: { temperature: 0.1, responseMimeType: "application/json" },
-      });
-      const result = await model.generateContent(prompt);
-      return JSON.parse(result.response.text()) as GeminiExtractionResult;
+        generationConfig: useGrounding
+          ? { temperature: 0.1 }
+          : { temperature: 0.1, responseMimeType: "application/json" },
+      };
+      if (useGrounding) {
+        modelConfig.tools = [{ googleSearch: {} }];
+      }
+
+      const model = genAI.getGenerativeModel(modelConfig as unknown as Parameters<GoogleGenerativeAI["getGenerativeModel"]>[0]);
+      // Globaler Semaphore: max GEMINI_GLOBAL_CONCURRENCY parallele Calls
+      const result = await geminiSemaphore.run(() => model.generateContent(prompt));
+      const text = result.response.text();
+
+      // Log grounding metadata if available
+      if (useGrounding) {
+        const meta = result.response.candidates?.[0]?.groundingMetadata;
+        const sources = (meta as Record<string, unknown[]> | undefined)?.groundingChunks?.length ?? 0;
+        console.info(`[Gemini] Grounding: ${sources} Quellen gefunden`);
+      }
+
+      const parsed = useGrounding ? parseJsonFromText(text) : JSON.parse(text);
+      if (!parsed) {
+        console.warn(`[Gemini] JSON-Parsing fehlgeschlagen: ${text.substring(0, 200)}`);
+        return null;
+      }
+      return parsed as GeminiExtractionResult;
     } catch (err) {
       if (attempt < MAX_RETRIES) {
-        const delay = is503(err) ? DELAYS_503[attempt] : 1000 * Math.pow(2, attempt);
-        console.warn(`[Gemini:${modelName}] Retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms (${is503(err) ? "503 overload" : "error"})`);
+        const delay = is503(err) ? DELAYS[attempt] * 2 : DELAYS[attempt];
+        const reason = is503(err) ? "503 overload" : "error";
+        console.warn(`[Gemini] Retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms (${reason})`);
         await new Promise((r) => setTimeout(r, delay));
         continue;
       }
-      // Alle Retries aufgebraucht
-      if (is503(err)) {
-        console.warn(`[Gemini:${modelName}] Nach ${MAX_RETRIES} Retries aufgegeben (503 overload)`);
-      } else {
-        console.error(`[Gemini:${modelName}] Fehlgeschlagen:`, err);
-      }
+      console.error(`[Gemini] Fehlgeschlagen nach ${MAX_RETRIES} Retries:`, (err as Error).message?.substring(0, 150));
       return null;
     }
   }
   return null;
 }
 
+export interface ExtractionStats {
+  stage1Calls: number;
+  stage2Calls: number;
+}
+
+/**
+ * 2-Stufen AI-Extraktion:
+ * 1. Schneller Call OHNE Grounding (~2-3s, $0.001) — reicht wenn CEO auf Website steht
+ * 2. Falls kein CEO UND opts.useGrounding=true: zweiter Call MIT Grounding (~8-10s, $0.035)
+ *
+ * `useGrounding`-Flag: nur bei requireCeo=true sinnvoll, sonst keine teure Google-Search-Suche.
+ * Spart ~70% Grounding-Kosten bei gleicher CEO-Findungsrate.
+ */
 export async function extractWithGemini(
   input: GeminiInput,
+  opts: { useGrounding?: boolean; stats?: ExtractionStats } = {},
 ): Promise<GeminiExtractionResult | null> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -93,32 +142,106 @@ export async function extractWithGemini(
     return null;
   }
 
+  const useGrounding = opts.useGrounding ?? false;
+  const stats = opts.stats;
   const genAI = new GoogleGenerativeAI(apiKey);
   const prompt = buildPrompt(input);
 
-  for (const modelName of GEMINI_MODELS) {
-    const parsed = await tryModel(genAI, modelName, prompt);
-    if (parsed) {
-      if (modelName !== GEMINI_MODELS[0]) {
-        console.info(`[Gemini] Erfolg mit Fallback-Modell: ${modelName}`);
-      }
-      // Gender normalisieren
-      parsed.ceo_gender = normalizeGender(parsed.ceo_gender);
-      // Branche normalisieren
-      parsed.industry = normalizeIndustry(parsed.industry);
-      // Confidence Score validieren
-      if (typeof parsed.confidence_score !== "number" || parsed.confidence_score < 0 || parsed.confidence_score > 1) {
-        parsed.confidence_score = 0.5;
-      }
-      return parsed;
+  // Stage 1: Ohne Grounding (schnell + billig)
+  if (stats) stats.stage1Calls++;
+  const stage1 = await callGemini(genAI, prompt, false);
+  if (stage1) {
+    const result = postProcess(stage1);
+    // Anti-Halluzination: Stage 1 ohne Grounding kann nicht "search" als Source haben
+    // Gemini lügt manchmal — wir korrigieren auf "website" oder null
+    if (result.ceo_source === "search") {
+      result.ceo_source = result.ceo_first_name || result.ceo_last_name ? "website" : null;
     }
-    if (modelName !== GEMINI_MODELS[GEMINI_MODELS.length - 1]) {
-      console.warn(`[Gemini] Wechsle zu Fallback-Modell nach Fehler mit ${modelName}`);
+    const ceoName = buildCeoName({ ...result }); // Test ob CEO-Name valide
+    if (ceoName) {
+      console.info(`[Gemini] Stage 1 (ohne Grounding): CEO "${ceoName}" gefunden`);
+      return result;
     }
+    // Stage 1 hat Daten aber keinen CEO → Stage 2 nur wenn explizit gewünscht
+    if (!useGrounding) {
+      return result; // ohne Grounding fertig, CEO bleibt leer
+    }
+    console.info(`[Gemini] Stage 1: kein CEO → starte Grounding-Suche...`);
+    if (stats) stats.stage2Calls++;
+    const stage2 = await callGemini(genAI, prompt, true);
+    if (stage2) {
+      const result2 = postProcess(stage2);
+      // Merge: CEO-Daten aus Stage 2, Rest aus Stage 1
+      return {
+        ...result,
+        ceo_title: result2.ceo_title || result.ceo_title,
+        ceo_first_name: result2.ceo_first_name || result.ceo_first_name,
+        ceo_last_name: result2.ceo_last_name || result.ceo_last_name,
+        ceo_gender: result2.ceo_first_name ? result2.ceo_gender : result.ceo_gender,
+        ceo_source: result2.ceo_first_name ? result2.ceo_source : result.ceo_source,
+      };
+    }
+    return result; // Stage 2 fehlgeschlagen, Stage 1 Daten zurückgeben
   }
 
-  console.error(`[Gemini] Alle Modelle fehlgeschlagen für "${input.companyName}"`);
+  // Stage 1 komplett fehlgeschlagen → direkt mit Grounding nur falls erlaubt
+  if (!useGrounding) {
+    console.warn(`[Gemini] Stage 1 fehlgeschlagen, useGrounding=false → null`);
+    return null;
+  }
+  console.warn(`[Gemini] Stage 1 fehlgeschlagen → direkt Grounding`);
+  if (stats) stats.stage2Calls++;
+  const fallback = await callGemini(genAI, prompt, true);
+  if (fallback) return postProcess(fallback);
+
+  console.error(`[Gemini] Alle Stufen fehlgeschlagen für "${input.companyName}"`);
   return null;
+}
+
+/** Entfernt Emojis und Pictogramme aus AI-Output (Gemini halluziniert manchmal Deko-Emojis). */
+function stripEmojis(text: string | null | undefined): string | null {
+  if (!text) return text ?? null;
+  const cleaned = text
+    .replace(/[\u{1F000}-\u{1FFFF}]/gu, "")   // Emoji-Blöcke (Pictographs, Emoticons, Transport, Symbols Extended)
+    .replace(/[\u{2600}-\u{27BF}]/gu, "")     // Misc Symbols + Dingbats
+    .replace(/[\u{1F1E6}-\u{1F1FF}]/gu, "")   // Regional Indicator (Flaggen)
+    .replace(/[\u{FE00}-\u{FE0F}]/gu, "")     // Variation Selectors
+    .replace(/[\u{200D}\u{20E3}]/gu, "")      // Zero-Width Joiner + Keycap-Combiner
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+/** Post-Processing: Normalisierung, Validation, Cleanup */
+function postProcess(parsed: GeminiExtractionResult): GeminiExtractionResult {
+  // Emojis aus allen Text-Feldern strippen (Gemini halluziniert z.B. "🍕 Mario's Pizza")
+  parsed.company_name  = stripEmojis(parsed.company_name);
+  parsed.ceo_title     = stripEmojis(parsed.ceo_title);
+  parsed.ceo_first_name = stripEmojis(parsed.ceo_first_name);
+  parsed.ceo_last_name = stripEmojis(parsed.ceo_last_name);
+  parsed.ceo_source    = stripEmojis(parsed.ceo_source);
+  parsed.email         = stripEmojis(parsed.email);
+  parsed.phone         = stripEmojis(parsed.phone);
+  parsed.industry      = stripEmojis(parsed.industry);
+  parsed.legal_form    = stripEmojis(parsed.legal_form);
+  parsed.street        = stripEmojis(parsed.street);
+  parsed.city          = stripEmojis(parsed.city);
+  parsed.postal_code   = stripEmojis(parsed.postal_code);
+  parsed.country       = stripEmojis(parsed.country);
+  // Gender normalisieren
+  parsed.ceo_gender = normalizeGender(parsed.ceo_gender);
+  // Branche normalisieren
+  parsed.industry = normalizeIndustry(parsed.industry);
+  // Confidence Score validieren
+  if (typeof parsed.confidence_score !== "number" || parsed.confidence_score < 0 || parsed.confidence_score > 1) {
+    parsed.confidence_score = 0.5;
+  }
+  // CEO-Name Cleanup
+  parsed.ceo_first_name = normalizeCeoName(parsed.ceo_first_name);
+  parsed.ceo_last_name = normalizeCeoName(parsed.ceo_last_name);
+  // Titel: nur ersten akademischen Grad behalten
+  parsed.ceo_title = normalizeTitle(parsed.ceo_title);
+  return parsed;
 }
 
 // Map ASCII-Keys (alte Werte) auf Labels mit Umlauten
@@ -148,6 +271,43 @@ function normalizeGender(g: string | null | undefined): "herr" | "frau" | "diver
   if (["frau", "weiblich", "female", "w", "f"].includes(v)) return "frau";
   if (["divers", "x", "nonbinary"].includes(v)) return "divers";
   return "unbekannt";
+}
+
+/** Normalisiert CEO-Namen: UPPERCASE→TitleCase, "unbekannt"→null */
+function normalizeCeoName(name: string | null | undefined): string | null {
+  if (!name) return null;
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  // "unbekannt", "null", "–", "n/a" → null
+  if (["unbekannt", "null", "n/a", "–", "-", "unknown", "keine"].includes(trimmed.toLowerCase())) return null;
+  // ALL UPPERCASE → Title Case (STEINHUBER → Steinhuber)
+  if (trimmed === trimmed.toUpperCase() && trimmed.length > 2) {
+    return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+  }
+  return trimmed;
+}
+
+/** Normalisiert Titel: nur ersten akademischen Grad behalten */
+function normalizeTitle(title: string | null | undefined): string | null {
+  if (!title) return null;
+  const trimmed = title.trim();
+  if (!trimmed) return null;
+  // Bekannte einzelne Titel direkt zurückgeben
+  const KNOWN_TITLES = ["Dr.", "Mag.", "DI", "Ing.", "MBA", "Prof.", "Dr. jur.", "Dr. med.", "LL.M."];
+  for (const t of KNOWN_TITLES) {
+    if (trimmed.toLowerCase() === t.toLowerCase()) return t;
+  }
+  // Mehrere Titel (z.B. "Dr., LLM, MBA") → nur den ersten behalten
+  const parts = trimmed.split(/[,\s]+/).filter(Boolean);
+  if (parts.length > 1) {
+    const first = parts[0].replace(/,$/, "");
+    for (const t of KNOWN_TITLES) {
+      if (first.toLowerCase() === t.toLowerCase().replace(/\.$/, "")) return t;
+      if (first.toLowerCase() === t.toLowerCase()) return t;
+    }
+    return first.endsWith(".") ? first : first + ".";
+  }
+  return trimmed;
 }
 
 /** Wörter die auf einen Geschäftsnamen (nicht Personenname) hindeuten */
@@ -196,6 +356,75 @@ export function buildCeoName(result: GeminiExtractionResult): string | null {
   return parts.join(" ");
 }
 
+/** Anti-Gambling: verifiziert dass eine Email entweder in den scraped emails ist
+ * ODER literal im websiteContent vorkommt. Sonst → null (Pipeline fällt dann auf
+ * selectBestEmail aus scraped emails zurück). */
+export function verifyEmailOrNull(
+  emailSuggestion: string | null,
+  scrapedEmails: string[],
+  websiteContent: string,
+): string | null {
+  if (!emailSuggestion) return null;
+  const email = emailSuggestion.toLowerCase().trim();
+  const scrapedLower = new Set(scrapedEmails.map((e) => e.toLowerCase().trim()));
+
+  // Aus scraping → ok
+  if (scrapedLower.has(email)) return emailSuggestion;
+
+  // Literal im website-content → ok
+  if (websiteContent && websiteContent.toLowerCase().includes(email)) return emailSuggestion;
+
+  // Gemini hat sich die Email ausgedacht
+  console.warn(`[Gemini] Email verworfen (nicht in scraped/content): "${email}" — Gambling-Schutz greift`);
+  return null;
+}
+
+/** Anti-Gambling: verifiziert dass der CEO-Name wirklich aus der Quelle stammt.
+ * Stage 1 (ceo_source="website"): Vor- UND Nachname müssen literal im websiteContent vorkommen.
+ * Stage 2 (ceo_source="search"): vertrauen wir Google Search Grounding, aber min. Confidence verlangen.
+ * Wenn Verifikation fehlschlägt → CEO-Felder auf null setzen. Lead wird trotzdem inserted (ohne CEO).
+ */
+export function verifyCeoOrNull(
+  result: GeminiExtractionResult,
+  websiteContent: string,
+): GeminiExtractionResult {
+  if (!result.ceo_first_name && !result.ceo_last_name) return result;
+
+  const first = (result.ceo_first_name || "").trim().toLowerCase();
+  const last = (result.ceo_last_name || "").trim().toLowerCase();
+
+  // 1. Min. Confidence 0.4 (sonst null)
+  if (typeof result.confidence_score === "number" && result.confidence_score < 0.4) {
+    console.warn(`[Gemini] CEO verworfen (confidence=${result.confidence_score} < 0.4): "${first} ${last}"`);
+    return { ...result, ceo_first_name: null, ceo_last_name: null, ceo_gender: "unbekannt", ceo_source: null };
+  }
+
+  // 2. Wenn ceo_source nicht gesetzt → null
+  if (!result.ceo_source) {
+    console.warn(`[Gemini] CEO verworfen (kein ceo_source): "${first} ${last}"`);
+    return { ...result, ceo_first_name: null, ceo_last_name: null, ceo_gender: "unbekannt" };
+  }
+
+  // 3. Bei ceo_source="website": Name MUSS literal im Content vorkommen (Anti-Gambling)
+  if (result.ceo_source === "website" && websiteContent) {
+    const content = websiteContent.toLowerCase();
+    const firstFound = first && content.includes(first);
+    const lastFound = last && content.includes(last);
+    if (!lastFound || (first && !firstFound)) {
+      console.warn(`[Gemini] CEO verworfen (nicht im website-content): "${first} ${last}" — Gemini hat sich das ausgedacht`);
+      return { ...result, ceo_first_name: null, ceo_last_name: null, ceo_gender: "unbekannt", ceo_source: null };
+    }
+  }
+
+  // 4. Mindestlängen
+  if (first.length < 2 || last.length < 2) {
+    console.warn(`[Gemini] CEO verworfen (zu kurz): "${first} ${last}"`);
+    return { ...result, ceo_first_name: null, ceo_last_name: null, ceo_gender: "unbekannt", ceo_source: null };
+  }
+
+  return result;
+}
+
 function buildPrompt(input: GeminiInput): string {
   return `Analysiere diese Daten und extrahiere strukturierte Informationen.
 
@@ -209,20 +438,19 @@ GELADENE SEITEN: ${input.pagesLoaded.join(", ")}
 WEBSITE-CONTENT:
 ${input.websiteContent.substring(0, 6000)}
 
-LANGSEARCH-SUCHERGEBNISSE ZUM GESCHAEFTSFUEHRER:
-${input.ceoSnippets.substring(0, 3000)}
-
 BEREITS GEFUNDENE DATEN:
 - Emails: ${JSON.stringify(input.emails)}
 - Telefone: ${JSON.stringify(input.phones)}
 
 AUFGABE:
 1. Finde den Ansprechpartner (Geschaeftsfuehrer/Inhaber/CEO)
+   - WICHTIG: Wenn der Name NICHT im Website-Content steht, nutze Google Search um nach "Geschäftsführer ${input.companyName}" oder "Inhaber ${input.companyName}" zu suchen!
    - Muss ein echter Personenname sein (Vorname + Nachname)
    - NICHT den Firmennamen als Person verwenden
    - "Familie X" oder "Team Y" ist KEIN gueltiger Name
    - Bei Ehepaaren (z.B. "Dagmar & Christian Santner"): nimm EINE Person, vorzugsweise die zuerst genannte
    - Wenn kein Name gefunden wird: alle CEO-Felder = null
+   - ceo_source: "website" wenn aus Website-Content, "search" wenn via Google Search gefunden
 
 2. ANREDE (ceo_gender) – NUR diese 4 Werte:
    - "herr" → maennlicher Vorname (Michael, Thomas, Hans, Christian, Peter, ...)

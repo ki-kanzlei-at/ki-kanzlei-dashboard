@@ -3,22 +3,15 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import type { SortingState, VisibilityState } from "@tanstack/react-table";
-import { 
-  Users, 
-  Search, 
-  Plus, 
-  Trash2, 
-  SlidersHorizontal,
-  MapPin,
-  Calendar,
+import {
+  Search,
+  Plus,
   Download,
-  FilterX,
-  RefreshCcw,
   InboxIcon,
   X,
+  SlidersHorizontal,
 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -49,27 +42,170 @@ import {
   EmptyContent,
 } from "@/components/ui/empty";
 
-import { LeadsTable, LEAD_STATUS_CONFIG } from "@/components/leads/LeadsTable";
-import { createColumns } from "@/components/leads/columns";
+import { LeadsTable } from "@/components/leads/LeadsTable";
+import { createColumns, LEAD_STATUS_CONFIG } from "@/components/leads/columns";
 import { DataTableViewOptions } from "@/components/leads/DataTableViewOptions";
 import { LeadSelectionBar } from "@/components/leads/LeadSelectionBar";
 import { LeadEditSheet } from "@/components/leads/LeadEditSheet";
 import { LeadDeleteDialog } from "@/components/leads/LeadDeleteDialog";
 import { SearchJobsList } from "@/components/leads/SearchJobsList";
 import { LeadSearchForm } from "@/components/leads/LeadSearchForm";
-import { IndustryCombobox } from "@/components/leads/IndustryCombobox";
-import { FilterCombobox } from "@/components/leads/FilterCombobox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandInput, CommandList, CommandEmpty, CommandItem } from "@/components/ui/command";
+import { Check } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type { SearchFormValues, SearchSource } from "@/components/leads/LeadSearchForm";
 
 import type { Lead, LeadStatus, SearchJob } from "@/types/leads";
-import { INDUSTRY_OPTIONS } from "@/types/leads";
+import { INDUSTRY_OPTIONS, COMPANY_TYPE_OPTIONS } from "@/types/leads";
 import { AT_BUNDESLAENDER } from "@/lib/bundesland";
 import { createClient as createBrowserClient } from "@/lib/supabase/client";
 
 // We need a ref to the table instance for the DataTableViewOptions
-import { useReactTable, getCoreRowModel, type ColumnDef } from "@tanstack/react-table";
+import { useReactTable, getCoreRowModel } from "@tanstack/react-table";
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 100;
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200, 500] as const;
+
+/* ── Persistenter Filter-State über localStorage ──
+ * Speichert Filter, Tab, Page-Size pro Browser, damit beim Reload nichts verloren geht.
+ * v1-Key damit zukünftige Struktur-Änderungen einen sauberen Reset zulassen. */
+const PERSIST_KEY = "ki-kanzlei:leads:state:v1";
+
+interface PersistedLeadsState {
+  search?: string;
+  status?: string;
+  industries?: string[];
+  legalForms?: string[];
+  cities?: string[];
+  states?: string[];
+  country?: string;
+  presence?: string[];
+  pageSize?: number | null;
+  activeTab?: string;
+}
+
+function loadPersistedLeadsState(): PersistedLeadsState {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(PERSIST_KEY);
+    return raw ? (JSON.parse(raw) as PersistedLeadsState) : {};
+  } catch { return {}; }
+}
+
+/* ── Filter-Trigger (Leads v3) — Dashed Border wenn leer, Solid wenn aktiv ── */
+type FilterTriggerPopoverProps =
+  | {
+      label: string;
+      value: string | null;
+      onClear: () => void;
+      multi: true;
+      selectValue: string[];
+      onSelectChange: (value: string[]) => void;
+      options: { value: string; label: string }[];
+      searchPlaceholder: string;
+      emptyText: string;
+    }
+  | {
+      label: string;
+      value: string | null;
+      onClear: () => void;
+      multi?: false;
+      selectValue: string;
+      onSelectChange: (value: string) => void;
+      options: { value: string; label: string }[];
+      searchPlaceholder: string;
+      emptyText: string;
+    };
+
+function FilterTriggerPopover(props: FilterTriggerPopoverProps) {
+  const { label, value, onClear, options, searchPlaceholder, emptyText } = props;
+  const hasValue = !!value;
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={cn("filter-trigger", hasValue && "has-value")}
+        >
+          {!hasValue && <Plus className="h-3 w-3" strokeWidth={1.75} />}
+          <span className="lbl">{label}</span>
+          {hasValue && <span className="val">{value}</span>}
+          {hasValue && (
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label={`${label} entfernen`}
+              className="x-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClear();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.stopPropagation();
+                  onClear();
+                }
+              }}
+            >
+              <X className="h-2.5 w-2.5" strokeWidth={1.75} />
+            </span>
+          )}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[260px] p-0" align="start">
+        <Command>
+          <CommandInput placeholder={searchPlaceholder} className="h-9 text-[13px]" />
+          <CommandList className="max-h-[260px]">
+            <CommandEmpty className="py-4 text-center text-[12px] text-muted-foreground">{emptyText}</CommandEmpty>
+            {options.map((opt) => {
+              const selected = props.multi
+                ? props.selectValue.includes(opt.value)
+                : props.selectValue === opt.value;
+              return (
+                <CommandItem
+                  key={opt.value}
+                  value={opt.label}
+                  onSelect={() => {
+                    if (props.multi) {
+                      props.onSelectChange(
+                        selected
+                          ? props.selectValue.filter((v) => v !== opt.value)
+                          : [...props.selectValue, opt.value],
+                      );
+                    } else {
+                      props.onSelectChange(opt.value);
+                    }
+                  }}
+                  className="text-[13px] cursor-pointer"
+                >
+                  <Check
+                    className={cn(
+                      "mr-2 h-3.5 w-3.5",
+                      selected ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                  {opt.label}
+                </CommandItem>
+              );
+            })}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/* ── Presence-Filter (Daten vorhanden) ── */
+const PRESENCE_OPTIONS = [
+  { key: "has_email",   label: "E-Mail" },
+  { key: "has_phone",   label: "Telefon" },
+  { key: "has_website", label: "Website" },
+  { key: "has_ceo",     label: "Geschäftsführer" },
+  { key: "has_social",  label: "Social Media" },
+] as const;
+type PresenceKey = (typeof PRESENCE_OPTIONS)[number]["key"];
 
 /* ── Pagination helpers ── */
 function buildPageNumbers(current: number, total: number): (number | "…")[] {
@@ -79,21 +215,11 @@ function buildPageNumbers(current: number, total: number): (number | "…")[] {
   return [1, "…", current - 1, current, current + 1, "…", total];
 }
 
-/* ── Status-Liste für Filter ── */
-const STATUS_FILTER_OPTIONS: { value: string; label: string }[] = [
-  { value: "all",       label: "Alle Status" },
-  { value: "new",       label: "Neu" },
-  { value: "interested",     label: "Interessiert" },
-  { value: "contacted", label: "Kontaktiert" },
-  { value: "converted", label: "Konvertiert" },
-  { value: "not_interested", label: "Kein Interesse" },
-];
-
 /* ══════════════════════════════════════════════════════════════
    Hauptkomponente
    ══════════════════════════════════════════════════════════════ */
 export default function LeadScrapingPage() {
-  /* ── State ── */
+  /* ── State (alle mit statischen Defaults für SSR-Match) ── */
   const [leads, setLeads]           = useState<Lead[]>([]);
   const [leadsCount, setLeadsCount] = useState(0);
   const [leadsLoading, setLeadsLoading] = useState(true);
@@ -103,7 +229,7 @@ export default function LeadScrapingPage() {
   const [jobsLoading, setJobsLoading] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
   const [searchSource, setSearchSource] = useState<SearchSource | null>(null);
-  const [activeTab, setActiveTab]   = useState("search");
+  const [activeTab, setActiveTab]   = useState<string>("leads");
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isGlobalSelected, setIsGlobalSelected] = useState(false);
@@ -114,16 +240,54 @@ export default function LeadScrapingPage() {
   const [deleteIds, setDeleteIds]   = useState<string[]>([]);
   const [crmSettings, setCrmSettings] = useState<Record<string, string | null>>({});
   const [leadSettings, setLeadSettings] = useState<{ default_country?: string; default_status?: string; require_ceo?: boolean; require_email?: boolean; page_size?: number } | null>(null);
-  const effectivePageSize = leadSettings?.page_size || PAGE_SIZE;
+  const [pageSizeOverride, setPageSizeOverride] = useState<number>(PAGE_SIZE);
+  const effectivePageSize = pageSizeOverride;
 
-  /* ── Filter State ── */
-  const [filterSearch, setFilterSearch]         = useState("");
-  const [filterStatus, setFilterStatus]         = useState("all");
-  const [filterIndustries, setFilterIndustries]   = useState<string[]>([]);
-  const [filterLegalForms, setFilterLegalForms]   = useState<string[]>([]);
-  const [filterCities, setFilterCities]           = useState<string[]>([]);
-  const [filterStates, setFilterStates]           = useState<string[]>([]);
+  /* ── Filter State (statische Defaults für SSR-Match, in useEffect aus localStorage hydriert) ── */
+  const [filterSearch, setFilterSearch]         = useState<string>("");
+  const [filterStatus, setFilterStatus]         = useState<string>("all");
+  const [filterIndustries, setFilterIndustries] = useState<string[]>([]);
+  const [filterLegalForms, setFilterLegalForms] = useState<string[]>([]);
+  const [filterCities, setFilterCities]         = useState<string[]>([]);
+  const [filterStates, setFilterStates]         = useState<string[]>([]);
   const [filterCountry, setFilterCountry]       = useState<string>("all");
+  const [filterJobId, setFilterJobId]           = useState<string | null>(null);
+
+  /* Hydration-sicher: localStorage ERST nach Mount lesen, sonst SSR-Mismatch */
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    const p = loadPersistedLeadsState();
+    if (typeof p.search === "string")           setFilterSearch(p.search);
+    if (typeof p.status === "string")           setFilterStatus(p.status);
+    if (Array.isArray(p.industries))            setFilterIndustries(p.industries);
+    if (Array.isArray(p.legalForms))            setFilterLegalForms(p.legalForms);
+    if (Array.isArray(p.cities))                setFilterCities(p.cities);
+    if (Array.isArray(p.states))                setFilterStates(p.states);
+    if (typeof p.country === "string")          setFilterCountry(p.country);
+    if (typeof p.activeTab === "string")        setActiveTab(p.activeTab);
+    if (typeof p.pageSize === "number" && (PAGE_SIZE_OPTIONS as readonly number[]).includes(p.pageSize)) {
+      setPageSizeOverride(p.pageSize);
+    }
+    setHydrated(true);
+  }, []);
+
+  /* Filter + Tab + Page-Size persistieren (erst nach Hydration, sonst überschreiben wir) */
+  useEffect(() => {
+    if (!hydrated || typeof window === "undefined") return;
+    try {
+      localStorage.setItem(PERSIST_KEY, JSON.stringify({
+        search: filterSearch,
+        status: filterStatus,
+        industries: filterIndustries,
+        legalForms: filterLegalForms,
+        cities: filterCities,
+        states: filterStates,
+        country: filterCountry,
+        pageSize: pageSizeOverride,
+        activeTab,
+      } satisfies PersistedLeadsState));
+    } catch { /* QuotaExceeded etc. ignorieren */ }
+  }, [hydrated, filterSearch, filterStatus, filterIndustries, filterLegalForms, filterCities, filterStates, filterCountry, pageSizeOverride, activeTab]);
 
   /* ── Sorting & Column Visibility ── */
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -134,7 +298,7 @@ export default function LeadScrapingPage() {
   const [cityOptions, setCityOptions]     = useState<{ value: string; label: string }[]>([]);
   const [countryOptions, setCountryOptions] = useState<{ value: string; label: string }[]>([]);
 
-  const hasActiveFilters = filterSearch || filterStatus !== "all" || filterIndustries.length > 0 || filterLegalForms.length > 0 || filterCities.length > 0 || filterStates.length > 0 || filterCountry !== "all";
+  const hasActiveFilters = !!filterSearch || filterStatus !== "all" || filterIndustries.length > 0 || filterLegalForms.length > 0 || filterCities.length > 0 || filterStates.length > 0 || filterCountry !== "all" || filterJobId !== null;
 
   function resetFilters() {
     setFilterSearch("");
@@ -144,6 +308,7 @@ export default function LeadScrapingPage() {
     setFilterCities([]);
     setFilterStates([]);
     setFilterCountry("all");
+    setFilterJobId(null);
     setLeadsPage(1);
   }
 
@@ -236,6 +401,7 @@ export default function LeadScrapingPage() {
       if (filterCities.length > 0) params.set("city", filterCities.join(","));
       if (filterStates.length > 0) params.set("state", filterStates.join(","));
       if (filterCountry !== "all") params.set("country", filterCountry);
+      if (filterJobId) params.set("search_job_id", filterJobId);
       if (sorting.length > 0) {
         params.set("sort_by", sorting[0].id);
         params.set("sort_dir", sorting[0].desc ? "desc" : "asc");
@@ -251,7 +417,7 @@ export default function LeadScrapingPage() {
     } finally {
       setLeadsLoading(false);
     }
-  }, [filterSearch, filterStatus, filterIndustries, filterLegalForms, filterCities, filterStates, filterCountry, sorting, effectivePageSize]);
+  }, [filterSearch, filterStatus, filterIndustries, filterLegalForms, filterCities, filterStates, filterCountry, filterJobId, sorting, effectivePageSize]);
 
   const fetchJobs = useCallback(async () => {
     setJobsLoading(true);
@@ -279,7 +445,7 @@ export default function LeadScrapingPage() {
     setIsGlobalSelected(false);
     fetchLeads(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterStatus, filterIndustries, filterLegalForms, filterCities, filterStates, filterCountry, sorting]);
+  }, [filterStatus, filterIndustries, filterLegalForms, filterCities, filterStates, filterCountry, filterJobId, sorting]);
 
   /* ── Debounced text-filter fetch (500ms, min 2 chars or empty) ── */
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -318,7 +484,9 @@ export default function LeadScrapingPage() {
   useEffect(() => { fetchJobsRef.current  = fetchJobs;  }, [fetchJobs]);
   useEffect(() => { leadsPageRef.current  = leadsPage;  }, [leadsPage]);
 
-  // Realtime-Subscription (einmal beim Mount, bleibt bis Unmount aktiv)
+  // Realtime-Subscription (einmal beim Mount, bleibt bis Unmount aktiv).
+  // Live-Toaster pro Job: 1 sticky Toast pro jobId, updated bei jeder DB-Mutation,
+  // wird zu success/error sobald der Job in einem End-Status landet.
   useEffect(() => {
     const channel = supabaseClient
       .channel("search_jobs_realtime")
@@ -332,16 +500,46 @@ export default function LeadScrapingPage() {
             if (idx === -1) return prev; // Nicht unsere Job-Liste
 
             const prevJob = prev[idx];
-            // Status-Transition Toast (nur einmal)
-            if (updated.status === "completed" && prevJob.status !== "completed") {
-              toast.success(
-                `Suche "${updated.query} in ${updated.location}" abgeschlossen — ${updated.results_count} Ergebnisse`,
+            const toastId = `job-${updated.id}`;
+            const locLabel = updated.location;
+            const queryLabel = updated.query.length > 50 ? updated.query.slice(0, 50) + "…" : updated.query;
+
+            // Status-Transitionen mit live-updatable Sonner Toast (gleiche ID = Update)
+            if (updated.status === "running" && updated.total_count && updated.total_count > 0) {
+              // Progress-Update während running
+              const pct = updated.results_count != null
+                ? Math.round((updated.results_count / updated.total_count) * 100)
+                : 0;
+              toast.loading(
+                `${queryLabel} · ${locLabel}`,
+                {
+                  id: toastId,
+                  description: `${updated.results_count ?? 0} / ${updated.total_count} Leads · ${pct}%`,
+                  duration: Infinity,
+                },
               );
+            } else if (updated.status === "running" && prevJob.status === "pending") {
+              // Pending → Running: erster Toast
+              toast.loading(`${queryLabel} · ${locLabel}`, {
+                id: toastId,
+                description: "Suche startet…",
+                duration: Infinity,
+              });
+            } else if (updated.status === "completed" && prevJob.status !== "completed") {
+              // Sticky-Toast zu success umwandeln
+              toast.success(`${queryLabel} · ${locLabel}`, {
+                id: toastId,
+                description: `${updated.results_count} Leads gefunden`,
+                duration: 6000,
+              });
               fetchLeadsRef.current(leadsPageRef.current);
             } else if (updated.status === "failed" && prevJob.status !== "failed") {
-              toast.error(
-                `Suche "${updated.query}" fehlgeschlagen: ${(updated as any).error_message ?? "Fehler"}`,
-              );
+              const errMsg = (updated as unknown as { error_message?: string }).error_message;
+              toast.error(`${queryLabel} · ${locLabel}`, {
+                id: toastId,
+                description: errMsg ?? "Suche fehlgeschlagen",
+                duration: 8000,
+              });
             }
             return prev.map((j) => (j.id === updated.id ? { ...j, ...updated } : j));
           });
@@ -359,6 +557,18 @@ export default function LeadScrapingPage() {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
+
+  // Polling-Fallback: solange aktive Jobs (pending/running) laufen, alle 4s frisch fetchen.
+  // Realtime hat Vorrang (instant), Polling fängt nur ab wenn Realtime nicht aktiviert ist.
+  // Kein Overhead bei idle (effect cleanup wenn keine aktiven Jobs).
+  useEffect(() => {
+    const hasActive = searchJobs.some((j) => j.status === "pending" || j.status === "running");
+    if (!hasActive) return;
+    const interval = setInterval(() => {
+      fetchJobsRef.current();
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [searchJobs]);
 
   // Stale-Timeout: letzter Fallback nach 2 Stunden (Realtime hat Vorrang)
   const STALE_JOB_TIMEOUT_MS = 2 * 60 * 60 * 1000;
@@ -391,20 +601,24 @@ export default function LeadScrapingPage() {
     return () => clearInterval(interval);
   }, [searchJobs, STALE_JOB_TIMEOUT_MS]);
 
-  /* ── Search submit (unterstützt mehrere Regionen gleichzeitig) ── */
+  /* ── Search submit ──
+   * Pro Branche × pro Region = 1 Job. 5 Jobs parallel (Backend-Slot-Limit),
+   * Rest wird automatisch eingereiht und nachgezogen.
+   */
   async function onSearchSubmit(values: SearchFormValues, source: SearchSource) {
     setIsSearching(true);
     setSearchSource(source);
 
-    // Suchbegriffe: Komma-getrennte Eingabe aufteilen
+    // Komma-getrennte Branchen aufteilen (Stadt/Land etc. bleibt gleich)
     const rawQueries = (values.query ?? "").split(",").map((s) => s.trim()).filter((s) => s.length >= 2);
-    const queries = rawQueries.length > 0 ? rawQueries : [values.query ?? ""];
+    const queries = rawQueries.length > 0 ? rawQueries : [(values.query ?? "").trim()];
 
     const locations = values.locations && values.locations.length > 0
       ? values.locations
       : [undefined as string | undefined];
 
     let successCount = 0;
+    let queuedCount = 0;
     const newJobs: SearchJob[] = [];
 
     try {
@@ -414,12 +628,14 @@ export default function LeadScrapingPage() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              query:        query,
-              location:     loc || undefined,
-              country:      values.country ?? "AT",
-              company_type: values.company_type,
-              city:         values.city || undefined,
-              require_ceo:  values.require_ceo || false,
+              query:           query,
+              location:        loc || undefined,
+              country:         values.country ?? "AT",
+              company_type:    values.company_type,
+              city:            values.city || undefined,
+              require_ceo:     values.require_ceo || false,
+              require_email:   values.require_email || false,
+              require_website: values.require_website || false,
             }),
           });
           if (!res.ok) {
@@ -429,20 +645,22 @@ export default function LeadScrapingPage() {
           }
           const json = await res.json();
           newJobs.push(json.data as SearchJob);
+          if (json.queued) queuedCount++;
           successCount++;
         }
       }
 
       if (successCount > 0) {
         setSearchJobs((prev) => [...newJobs.reverse(), ...prev]);
-        setActiveTab("search");
-        const total = queries.length * locations.length;
-        if (total === 1) {
-          const loc = locations[0];
-          const locationLabel = values.city ? values.city : loc || values.country || "DACH";
-          toast.success(`Suche nach "${queries[0]}" in ${locationLabel} gestartet`);
-        } else {
-          toast.success(`${successCount} Suchaufträge gestartet`);
+        // Kein Auto-Tab-Switch — User bleibt wo er war, Toast zeigt Fortschritt
+        // Pro Job ein sticky Loading-Toast (wird vom Realtime-Handler später zu success/error umgewandelt)
+        for (const j of newJobs) {
+          const queryLabel = j.query.length > 50 ? j.query.slice(0, 50) + "…" : j.query;
+          toast.loading(`${queryLabel} · ${j.location}`, {
+            id: `job-${j.id}`,
+            description: j.status === "pending" ? "In Warteschlange…" : "Suche startet…",
+            duration: Infinity,
+          });
         }
       }
     } catch (err) {
@@ -574,7 +792,7 @@ export default function LeadScrapingPage() {
         "Straße", "PLZ", "Stadt", "Land",
         "GF Name", "GF Vorname", "GF Nachname", "GF Anrede",
         "Status", "Google Rating", "Google Reviews",
-        "LinkedIn", "Facebook", "Instagram", "Xing",
+        "LinkedIn", "Facebook", "Instagram",
         "Notizen", "Erstellt am",
       ];
       const rows = exportLeads.map((l) => [
@@ -582,7 +800,7 @@ export default function LeadScrapingPage() {
         l.street ?? "", l.postal_code ?? "", l.city ?? "", l.country ?? "",
         l.ceo_name ?? "", l.ceo_first_name ?? "", l.ceo_last_name ?? "", l.ceo_gender ?? "",
         l.status, l.google_rating ?? "", l.google_reviews_count ?? "",
-        l.social_linkedin ?? "", l.social_facebook ?? "", l.social_instagram ?? "", l.social_xing ?? "",
+        l.social_linkedin ?? "", l.social_facebook ?? "", l.social_instagram ?? "",
         l.notes ?? "", l.created_at?.slice(0, 10) ?? "",
       ]);
 
@@ -687,40 +905,68 @@ export default function LeadScrapingPage() {
   /* ══════════════════════════════════════════════════════════
      Render
      ══════════════════════════════════════════════════════════ */
+  const statusTabs: { value: string; label: string }[] = [
+    { value: "all",            label: "Alle" },
+    { value: "new",            label: "Neu" },
+    { value: "interested",     label: "Interessiert" },
+    { value: "contacted",      label: "Kontaktiert" },
+    { value: "converted",      label: "Konvertiert" },
+    { value: "not_interested", label: "Kein Interesse" },
+  ];
+
   return (
-    <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
+    <div className="leads-v3 flex flex-col gap-4 py-4 md:gap-6 md:py-6">
 
       {/* Page Header + Search */}
       <div className="px-4 lg:px-6 space-y-4">
-        <div className="space-y-1.5">
-          <h1 className="text-2xl font-bold tracking-tight">Leads</h1>
-          <p className="text-sm text-muted-foreground">
-            Finde und verwalte potenzielle Kunden. Suche nach Branche, Region oder Ort.
-          </p>
+        <div className="flex items-start justify-between gap-6">
+          <div className="space-y-1">
+            <h1 className="text-[24px] font-semibold tracking-tight leading-tight">Leads</h1>
+            <p className="text-[13.5px] text-muted-foreground max-w-xl">
+              Finde, qualifiziere und kontaktiere potenzielle Mandanten in Österreich, Deutschland und der Schweiz.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 text-xs font-medium"
+              onClick={() => handleExport("csv")}
+              disabled={leadsLoading}
+            >
+              <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Export
+            </Button>
+          </div>
         </div>
-        <LeadSearchForm onSubmit={onSearchSubmit} isSearching={isSearching} searchSource={searchSource} defaultCountry={leadSettings?.default_country} defaultRequireCeo={leadSettings?.require_ceo} />
+
+        <LeadSearchForm
+          onSubmit={onSearchSubmit}
+          isSearching={isSearching}
+          searchSource={searchSource}
+          defaultCountry={leadSettings?.default_country}
+          defaultRequireCeo={leadSettings?.require_ceo}
+        />
       </div>
 
-      {/* Tabs */}
+      {/* Top-Level View Switch: Alle Leads vs Suchaufträge */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-0 px-4 lg:px-6">
-        <div className="flex items-center justify-between">
-          <TabsList>
-            <TabsTrigger value="search" className="gap-1.5">
-              <Search className="h-4 w-4" />
-              Suchaufträge
-              {activeJobsCount > 0 && (
-                <Badge className="ml-1 bg-primary/10 text-primary hover:bg-primary/15">
-                  {activeJobsCount}
-                </Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="leads" className="gap-1.5">
-              <Users className="h-4 w-4" />
+        <div className="flex items-center justify-between border-b border-border">
+          <TabsList variant="line" className="border-b-0">
+            <TabsTrigger value="leads" className="gap-2 text-[13px]">
               Alle Leads
               {leadsCount > 0 && (
-                <Badge className="ml-1 bg-primary/10 text-primary hover:bg-primary/15">
-                  {leadsCount}
-                </Badge>
+                <span className="text-[11px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full font-medium data-[state=active]:text-primary">
+                  {leadsCount.toLocaleString("de-DE")}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="search" className="gap-2 text-[13px]">
+              Suchaufträge
+              {activeJobsCount > 0 && (
+                <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-medium">
+                  {activeJobsCount}
+                </span>
               )}
             </TabsTrigger>
           </TabsList>
@@ -731,6 +977,10 @@ export default function LeadScrapingPage() {
           <SearchJobsList
             jobs={searchJobs}
             loading={jobsLoading}
+            onJobClick={(jobId) => {
+              setFilterJobId(jobId);
+              setActiveTab("leads");
+            }}
             onJobCancelled={(jobId) => {
               setSearchJobs((prev) =>
                 prev.map((j) =>
@@ -757,212 +1007,152 @@ export default function LeadScrapingPage() {
         </TabsContent>
 
         {/* Tab: Alle Leads */}
-        <TabsContent value="leads" className="mt-4">
-          <div className="rounded-lg border bg-card overflow-hidden">
+        <TabsContent value="leads" className="mt-4 space-y-0">
 
-            {/* Toolbar */}
-            <div className="px-4 py-3 border-b bg-muted/20 space-y-2.5">
-              {/* Zeile 1: Textsuche + Status + Branche */}
-              <div className="flex items-center gap-3 flex-wrap">
-                <div className="relative w-64">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/40 pointer-events-none z-10" />
-                  <Input
-                    placeholder="Suche (Firma, Name, E-Mail)"
-                    className="pl-9 h-9 text-sm"
-                    value={filterSearch}
-                    onChange={(e) => setFilterSearch(e.target.value)}
-                  />
-                </div>
+          {/* Status-Sub-Tabs */}
+          <Tabs value={filterStatus} onValueChange={setFilterStatus} className="space-y-0">
+            <TabsList variant="line" className="border-b border-border w-full justify-start">
+              {statusTabs.map((tab) => (
+                <TabsTrigger key={tab.value} value={tab.value} className="text-[13px] gap-2">
+                  {tab.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
 
-                <Select value={filterStatus} onValueChange={setFilterStatus}>
-                  <SelectTrigger className="h-9 w-40 text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {STATUS_FILTER_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+          <div className="rounded-b-[var(--radius)] border border-t-0 border-border bg-card overflow-hidden">
 
-                <div className="w-48">
-                  <IndustryCombobox
-                    value={filterIndustries}
-                    onChange={setFilterIndustries}
-                    placeholder="Branche filtern"
-                    options={industryOptions.length > 0 ? industryOptions : undefined}
-                  />
-                </div>
-
-                <DataTableViewOptions table={toolbarTable} />
-              </div>
-
-              {/* Zeile 2: Standort-Filter + Rechtsform + Reset */}
-              <div className="flex items-center gap-3 flex-wrap">
-                <FilterCombobox
-                  value={filterCountry}
-                  onChange={setFilterCountry}
-                  options={countryOptions}
-                  placeholder="Land"
-                  searchPlaceholder="Land suchen…"
-                  emptyText="Kein Land gefunden"
-                  allLabel="Alle Länder"
-                  className="w-40 text-sm"
+            {/* Toolbar v3 — Single row: Search + filter-triggers + view/export right */}
+            <div className="px-4 py-3 border-b border-border flex items-center gap-2.5 flex-wrap bg-card">
+              <div className="relative w-72">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60 pointer-events-none" strokeWidth={1.75} />
+                <Input
+                  placeholder="Firma, Kontakt, E-Mail …"
+                  className="pl-9 h-8 text-[13px] bg-card"
+                  value={filterSearch}
+                  onChange={(e) => setFilterSearch(e.target.value)}
                 />
-
-                <FilterCombobox
-                  multi
-                  value={filterStates}
-                  onChange={setFilterStates}
-                  options={AT_BUNDESLAENDER}
-                  placeholder="Bundesland"
-                  searchPlaceholder="Bundesland suchen…"
-                  emptyText="Kein Bundesland gefunden"
-                  className="w-44 text-sm"
-                />
-
-                <FilterCombobox
-                  multi
-                  value={filterCities}
-                  onChange={setFilterCities}
-                  options={cityOptions}
-                  placeholder="Stadt"
-                  searchPlaceholder="Stadt suchen…"
-                  emptyText="Keine Stadt gefunden"
-                  className="w-44 text-sm"
-                />
-
-                <FilterCombobox
-                  multi
-                  value={filterLegalForms}
-                  onChange={setFilterLegalForms}
-                  options={[
-                    { value: "gmbh", label: "GmbH" },
-                    { value: "eu", label: "Einzelunternehmen" },
-                    { value: "ag", label: "AG" },
-                    { value: "og", label: "OG" },
-                    { value: "kg", label: "KG" },
-                  ]}
-                  placeholder="Rechtsform"
-                  searchPlaceholder="Rechtsform suchen…"
-                  emptyText="Keine Rechtsform gefunden"
-                  className="w-44 text-sm"
-                />
-
-                {hasActiveFilters && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="gap-1.5 text-muted-foreground"
-                    onClick={resetFilters}
+                {filterSearch && (
+                  <button
+                    onClick={() => setFilterSearch("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 inline-grid place-items-center h-5 w-5 rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                    aria-label="Suche löschen"
                   >
-                    <X className="h-4 w-4" />
-                    Zurücksetzen
-                  </Button>
+                    <X className="h-3 w-3" strokeWidth={1.75} />
+                  </button>
                 )}
               </div>
 
-              {/* Zeile 3: Aktive Multi-Filter Chips */}
-              {(filterIndustries.length > 0 || filterCities.length > 0 || filterStates.length > 0 || filterLegalForms.length > 0) && (
-                <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                  {filterStates.map((st) => (
-                    <Badge
-                      key={st}
-                      variant="outline"
-                      className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1 pr-1 font-normal cursor-default"
-                    >
-                      <MapPin className="h-3 w-3 opacity-60" />
-                      {st}
-                      <button
-                        type="button"
-                        onClick={() => setFilterStates(filterStates.filter((v) => v !== st))}
-                        className="rounded-full hover:bg-emerald-100 p-0.5 transition-colors"
-                      >
-                        <X className="h-2.5 w-2.5" />
-                      </button>
-                    </Badge>
-                  ))}
-                  {filterIndustries.map((ind) => (
-                    <Badge
-                      key={ind}
-                      variant="outline"
-                      className="bg-primary/10 text-primary border-primary/20 gap-1 pr-1 font-normal cursor-default"
-                    >
-                      {ind}
-                      <button
-                        type="button"
-                        onClick={() => setFilterIndustries(filterIndustries.filter((v) => v !== ind))}
-                        className="rounded-full hover:bg-primary/20 p-0.5 transition-colors"
-                      >
-                        <X className="h-2.5 w-2.5" />
-                      </button>
-                    </Badge>
-                  ))}
-                  {filterCities.map((city) => (
-                    <Badge
-                      key={city}
-                      variant="secondary"
-                      className="gap-1 pr-1 font-normal cursor-default"
-                    >
-                      <MapPin className="h-3 w-3 opacity-60" />
-                      {city}
-                      <button
-                        type="button"
-                        onClick={() => setFilterCities(filterCities.filter((v) => v !== city))}
-                        className="rounded-full hover:bg-foreground/10 p-0.5 transition-colors"
-                      >
-                        <X className="h-2.5 w-2.5" />
-                      </button>
-                    </Badge>
-                  ))}
-                  {filterLegalForms.map((lf) => {
-                    const label = { gmbh: "GmbH", eu: "Einzelunternehmen", ag: "AG", og: "OG", kg: "KG" }[lf] ?? lf;
-                    return (
-                      <Badge
-                        key={lf}
-                        variant="outline"
-                        className="bg-amber-50 text-amber-700 border-amber-200 gap-1 pr-1 font-normal cursor-default"
-                      >
-                        {label}
-                        <button
-                          type="button"
-                          onClick={() => setFilterLegalForms(filterLegalForms.filter((v) => v !== lf))}
-                          className="rounded-full hover:bg-amber-100 p-0.5 transition-colors"
-                        >
-                          <X className="h-2.5 w-2.5" />
-                        </button>
-                      </Badge>
-                    );
-                  })}
-                </div>
-              )}
+              <div className="flex items-center gap-2 flex-wrap">
+                <FilterTriggerPopover
+                  label="Branche"
+                  value={filterIndustries.length > 0 ? `${filterIndustries.length === 1 ? filterIndustries[0] : `${filterIndustries.length} ausgewählt`}` : null}
+                  onClear={() => setFilterIndustries([])}
+                  multi
+                  selectValue={filterIndustries}
+                  onSelectChange={setFilterIndustries}
+                  options={industryOptions.length > 0 ? industryOptions : [...INDUSTRY_OPTIONS]}
+                  searchPlaceholder="Branche suchen…"
+                  emptyText="Keine Branche gefunden"
+                />
+
+                <FilterTriggerPopover
+                  label="Bundesland"
+                  value={filterStates.length > 0 ? (filterStates.length === 1 ? filterStates[0] : `${filterStates.length} ausgewählt`) : null}
+                  onClear={() => setFilterStates([])}
+                  multi
+                  selectValue={filterStates}
+                  onSelectChange={setFilterStates}
+                  options={AT_BUNDESLAENDER}
+                  searchPlaceholder="Bundesland suchen…"
+                  emptyText="Kein Bundesland gefunden"
+                />
+
+                <FilterTriggerPopover
+                  label="Stadt"
+                  value={filterCities.length > 0 ? (filterCities.length === 1 ? filterCities[0] : `${filterCities.length} ausgewählt`) : null}
+                  onClear={() => setFilterCities([])}
+                  multi
+                  selectValue={filterCities}
+                  onSelectChange={setFilterCities}
+                  options={cityOptions}
+                  searchPlaceholder="Stadt suchen…"
+                  emptyText="Keine Stadt gefunden"
+                />
+
+                <FilterTriggerPopover
+                  label="Rechtsform"
+                  value={filterLegalForms.length > 0 ? (filterLegalForms.length === 1 ? (COMPANY_TYPE_OPTIONS.find((o) => o.value === filterLegalForms[0])?.label ?? filterLegalForms[0]) : `${filterLegalForms.length} ausgewählt`) : null}
+                  onClear={() => setFilterLegalForms([])}
+                  multi
+                  selectValue={filterLegalForms}
+                  onSelectChange={setFilterLegalForms}
+                  options={COMPANY_TYPE_OPTIONS.filter((o) => o.value !== "all").map((o) => ({ value: o.value, label: o.label }))}
+                  searchPlaceholder="Rechtsform suchen…"
+                  emptyText="Keine Rechtsform gefunden"
+                />
+
+                <FilterTriggerPopover
+                  label="Land"
+                  value={filterCountry !== "all" ? (countryOptions.find((o) => o.value === filterCountry)?.label ?? filterCountry) : null}
+                  onClear={() => setFilterCountry("all")}
+                  selectValue={filterCountry}
+                  onSelectChange={setFilterCountry}
+                  options={countryOptions}
+                  searchPlaceholder="Land suchen…"
+                  emptyText="Kein Land gefunden"
+                />
+
+                {hasActiveFilters && (
+                  <button
+                    onClick={resetFilters}
+                    className="inline-flex items-center gap-1 h-8 px-2 text-[12px] text-muted-foreground hover:text-foreground rounded-md hover:bg-muted transition-colors"
+                  >
+                    <X className="h-3 w-3" strokeWidth={1.75} />
+                    Zurücksetzen
+                  </button>
+                )}
+              </div>
+
+              <div className="ml-auto flex items-center gap-2">
+                {!leadsLoading && (
+                  <span className="text-[12.5px] text-muted-foreground">
+                    <b className="text-foreground font-semibold">{leadsCount.toLocaleString("de-DE")}</b> Ergebnisse
+                  </span>
+                )}
+                <DataTableViewOptions table={toolbarTable} />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs font-medium"
+                  onClick={() => handleExport("csv")}
+                >
+                  <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  Export
+                </Button>
+              </div>
             </div>
 
-            {/* Count-Bar */}
-            <div className="px-4 py-2.5 border-b bg-muted/30 flex items-center gap-2 flex-wrap">
-              <p className="text-sm text-muted-foreground">
-                {leadsCount.toLocaleString("de-DE")} Einträge gesamt
-              </p>
-              {hasActiveFilters && (
-                <Badge variant="outline" className="text-primary border-primary/30 bg-primary/5 font-normal">
-                  gefiltert
-                </Badge>
-              )}
-              {selectedIds.size > 0 && (
-                <Badge className="font-normal">
-                  {isGlobalSelected ? leadsCount.toLocaleString("de-DE") : selectedIds.size} ausgewählt
-                  {isGlobalSelected && " (alle)"}
-                </Badge>
-              )}
-            </div>
+            {/* Job-Filter Indicator (kompakt unterhalb Toolbar) */}
+            {filterJobId && (
+              <div className="px-4 py-2 border-b border-border bg-accent/40 flex items-center gap-2 text-[12px] text-foreground">
+                <SlidersHorizontal className="h-3 w-3 text-muted-foreground" strokeWidth={1.75} />
+                Gefiltert nach Suchauftrag
+                <button
+                  onClick={() => setFilterJobId(null)}
+                  className="ml-auto inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3 w-3" strokeWidth={1.75} />
+                  Aufheben
+                </button>
+              </div>
+            )}
 
             {/* Table or states */}
             {leadsLoading ? (
-              <div className="p-5 space-y-2.5">
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <Skeleton key={i} className="h-12 w-full rounded-md" />
+              <div className="p-4 space-y-2">
+                {Array.from({ length: Math.min(effectivePageSize, 12) }).map((_, i) => (
+                  <Skeleton key={i} className="h-11 w-full rounded-md" />
                 ))}
               </div>
             ) : leads.length === 0 ? (
@@ -1005,53 +1195,77 @@ export default function LeadScrapingPage() {
                 />
 
                 {/* Pagination */}
-                {totalPages > 1 && (
-                  <>
-                    <Separator />
-                    <div className="px-4 py-3 flex items-center justify-between gap-4">
-                      <p className="text-sm text-muted-foreground whitespace-nowrap">
-                        Seite {leadsPage} von {totalPages} ({leadsCount} Leads)
-                      </p>
-                      <Pagination className="mx-0 w-auto justify-end">
-                        <PaginationContent className="gap-1">
-                          <PaginationItem>
-                            <PaginationPrevious
-                              href="#"
-                              onClick={(e) => { e.preventDefault(); if (leadsPage > 1) handlePageChange(leadsPage - 1); }}
-                              className={leadsPage <= 1 ? "pointer-events-none opacity-40" : ""}
-                            />
-                          </PaginationItem>
-
-                          {pageNumbers.map((p, i) =>
-                            p === "…" ? (
-                              <PaginationItem key={`ellipsis-${i}`}>
-                                <PaginationEllipsis />
-                              </PaginationItem>
-                            ) : (
-                              <PaginationItem key={p}>
-                                <PaginationLink
-                                  href="#"
-                                  isActive={p === leadsPage}
-                                  onClick={(e) => { e.preventDefault(); handlePageChange(p as number); }}
-                                >
-                                  {p}
-                                </PaginationLink>
-                              </PaginationItem>
-                            ),
-                          )}
-
-                          <PaginationItem>
-                            <PaginationNext
-                              href="#"
-                              onClick={(e) => { e.preventDefault(); if (leadsPage < totalPages) handlePageChange(leadsPage + 1); }}
-                              className={leadsPage >= totalPages ? "pointer-events-none opacity-40" : ""}
-                            />
-                          </PaginationItem>
-                        </PaginationContent>
-                      </Pagination>
+                <Separator />
+                <div className="px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground whitespace-nowrap">Pro Seite</span>
+                      <Select
+                        value={String(effectivePageSize)}
+                        onValueChange={(v) => {
+                          setPageSizeOverride(Number(v));
+                          setLeadsPage(1);
+                        }}
+                      >
+                        <SelectTrigger className="h-8 w-[78px] text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PAGE_SIZE_OPTIONS.map((n) => (
+                            <SelectItem key={n} value={String(n)} className="text-sm">{n}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
-                  </>
-                )}
+                    <p className="text-sm text-muted-foreground whitespace-nowrap">
+                      {((leadsPage - 1) * effectivePageSize + 1).toLocaleString("de-DE")}
+                      –
+                      {Math.min(leadsPage * effectivePageSize, leadsCount).toLocaleString("de-DE")}
+                      {" "}von{" "}
+                      <span className="font-medium text-foreground">{leadsCount.toLocaleString("de-DE")}</span>
+                    </p>
+                  </div>
+
+                  {totalPages > 1 && (
+                    <Pagination className="mx-0 w-auto justify-end">
+                      <PaginationContent className="gap-1">
+                        <PaginationItem>
+                          <PaginationPrevious
+                            href="#"
+                            onClick={(e) => { e.preventDefault(); if (leadsPage > 1) handlePageChange(leadsPage - 1); }}
+                            className={leadsPage <= 1 ? "pointer-events-none opacity-40" : ""}
+                          />
+                        </PaginationItem>
+
+                        {pageNumbers.map((p, i) =>
+                          p === "…" ? (
+                            <PaginationItem key={`ellipsis-${i}`}>
+                              <PaginationEllipsis />
+                            </PaginationItem>
+                          ) : (
+                            <PaginationItem key={p}>
+                              <PaginationLink
+                                href="#"
+                                isActive={p === leadsPage}
+                                onClick={(e) => { e.preventDefault(); handlePageChange(p as number); }}
+                              >
+                                {p}
+                              </PaginationLink>
+                            </PaginationItem>
+                          ),
+                        )}
+
+                        <PaginationItem>
+                          <PaginationNext
+                            href="#"
+                            onClick={(e) => { e.preventDefault(); if (leadsPage < totalPages) handlePageChange(leadsPage + 1); }}
+                            className={leadsPage >= totalPages ? "pointer-events-none opacity-40" : ""}
+                          />
+                        </PaginationItem>
+                      </PaginationContent>
+                    </Pagination>
+                  )}
+                </div>
               </>
             )}
           </div>

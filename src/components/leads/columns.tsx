@@ -2,18 +2,24 @@
 
 import { ColumnDef } from "@tanstack/react-table";
 import {
-  Building2,
-  MapPin,
-  ExternalLink,
-  Linkedin,
-  Facebook,
-  Instagram,
   MoreHorizontal,
   Pencil,
   Trash2,
+  Mail,
+  Phone as PhoneIcon,
+  ExternalLink,
+  MapPin,
 } from "lucide-react";
+import { CompanyFavicon } from "./CompanyFavicon";
+import {
+  BrandLinkedIn,
+  BrandFacebook,
+  BrandInstagram,
+  BrandX,
+  BrandYouTube,
+  BrandTikTok,
+} from "./BrandIcons";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -36,60 +42,55 @@ import { DataTableColumnHeader } from "./DataTableColumnHeader";
 import type { Lead, LeadStatus } from "@/types/leads";
 import { countryLabel } from "@/types/leads";
 
-/* ── Status config (matching LinkedIn badge pattern: bg/8 + text + border) ── */
+/* ── Status config — KI Kanzlei Brand-Palette (badge-status) ── */
 export const LEAD_STATUS_CONFIG: Record<
   LeadStatus,
   { label: string; className: string; dot: string }
 > = {
-  new:              { label: "Neu",               className: "bg-primary/8 text-primary border border-primary/15",                dot: "bg-primary/50" },
-  contacted:        { label: "Kontaktiert",       className: "bg-amber-500/10 text-amber-700 border border-amber-500/15",        dot: "bg-amber-500" },
-  interested:       { label: "Interessiert",      className: "bg-emerald-500/10 text-emerald-700 border border-emerald-500/15",  dot: "bg-emerald-500" },
-  not_interested:   { label: "Kein Interesse",    className: "bg-muted text-muted-foreground border border-border",              dot: "bg-muted-foreground/50" },
-  converted:        { label: "Konvertiert",       className: "bg-primary/12 text-primary border border-primary/20",              dot: "bg-primary" },
+  new:              { label: "Neu",            className: "status-new",            dot: "bg-sky-500" },
+  contacted:        { label: "Kontaktiert",    className: "status-contacted",      dot: "bg-blue-500" },
+  interested:       { label: "Interessiert",   className: "status-interested",     dot: "bg-primary" },
+  not_interested:   { label: "Kein Interesse", className: "status-not_interested", dot: "bg-muted-foreground/50" },
+  converted:        { label: "Konvertiert",    className: "status-converted",      dot: "bg-indigo-600" },
 };
 
 const STATUS_LIST: { value: LeadStatus; label: string; dot: string }[] = [
-  { value: "new",            label: "Neu",            dot: "bg-primary/50" },
-  { value: "contacted",      label: "Kontaktiert",    dot: "bg-amber-500" },
-  { value: "interested",     label: "Interessiert",   dot: "bg-emerald-500" },
+  { value: "new",            label: "Neu",            dot: "bg-sky-500" },
+  { value: "contacted",      label: "Kontaktiert",    dot: "bg-blue-500" },
+  { value: "interested",     label: "Interessiert",   dot: "bg-primary" },
+  { value: "converted",      label: "Konvertiert",    dot: "bg-indigo-600" },
   { value: "not_interested", label: "Kein Interesse", dot: "bg-muted-foreground/50" },
-  { value: "converted",      label: "Konvertiert",    dot: "bg-primary" },
 ];
 
 /* ── Social Icons sub-component ── */
 function SocialIcons({ lead }: { lead: Lead }) {
   const socials = [
-    { url: lead.social_linkedin,  label: "LinkedIn",  icon: Linkedin,  color: "text-[#0A66C2]" },
-    { url: lead.social_facebook,  label: "Facebook",  icon: Facebook,  color: "text-[#1877F2]" },
-    { url: lead.social_instagram, label: "Instagram", icon: Instagram, color: "text-[#E4405F]" },
-    { url: lead.social_xing,      label: "Xing",      icon: undefined, color: "text-[#006567]" },
-    { url: lead.social_twitter,   label: "X",         icon: undefined, color: "text-foreground" },
-    { url: lead.social_youtube,   label: "YT",        icon: undefined, color: "text-[#FF0000]" },
-    { url: lead.social_tiktok,    label: "TT",        icon: undefined, color: "text-foreground" },
+    { url: lead.social_linkedin,  label: "LinkedIn",  Icon: BrandLinkedIn,  color: "text-[#0A66C2]" },
+    { url: lead.social_facebook,  label: "Facebook",  Icon: BrandFacebook,  color: "text-[#1877F2]" },
+    { url: lead.social_instagram, label: "Instagram", Icon: BrandInstagram, color: "text-[#E4405F]" },
+    { url: lead.social_twitter,   label: "X",         Icon: BrandX,         color: "text-foreground" },
+    { url: lead.social_youtube,   label: "YouTube",   Icon: BrandYouTube,   color: "text-[#FF0000]" },
+    { url: lead.social_tiktok,    label: "TikTok",    Icon: BrandTikTok,    color: "text-foreground" },
   ].filter((s) => s.url);
 
   if (socials.length === 0) return <span className="text-xs text-muted-foreground/50">—</span>;
 
   return (
-    <div className="flex items-center gap-1">
-      {socials.map((s) => (
-        <Tooltip key={s.label}>
+    <div className="flex items-center gap-1.5">
+      {socials.map(({ url, label, Icon, color }) => (
+        <Tooltip key={label}>
           <TooltipTrigger asChild>
             <a
-              href={s.url!}
+              href={url!}
               target="_blank"
               rel="noopener noreferrer"
-              className={cn("hover:opacity-60 transition-opacity", s.color)}
+              className={cn("inline-flex hover:opacity-60 transition-opacity", color)}
               onClick={(e) => e.stopPropagation()}
             >
-              {s.icon ? (
-                <s.icon className="h-3.5 w-3.5" />
-              ) : (
-                <span className="text-[10px] font-bold leading-none">{s.label}</span>
-              )}
+              <Icon className="h-3.5 w-3.5" />
             </a>
           </TooltipTrigger>
-          <TooltipContent>{s.label}</TooltipContent>
+          <TooltipContent>{label}</TooltipContent>
         </Tooltip>
       ))}
     </div>
@@ -109,9 +110,7 @@ export function createColumns(actions: ColumnActions): ColumnDef<Lead>[] {
     {
       id: "select",
       header: ({ table }) => (
-        <div
-          onClick={(e) => e.stopPropagation()}
-        >
+        <div onClick={(e) => e.stopPropagation()}>
           <Checkbox
             checked={
               table.getIsAllPageRowsSelected()
@@ -126,10 +125,7 @@ export function createColumns(actions: ColumnActions): ColumnDef<Lead>[] {
         </div>
       ),
       cell: ({ row }) => (
-        <div
-          className="relative z-10"
-          onClick={(e) => e.stopPropagation()}
-        >
+        <div className="relative z-10" onClick={(e) => e.stopPropagation()}>
           <Checkbox
             className="cursor-pointer"
             checked={row.getIsSelected()}
@@ -143,42 +139,75 @@ export function createColumns(actions: ColumnActions): ColumnDef<Lead>[] {
       size: 40,
     },
 
-    /* Firma */
+    /* Firma — Favicon + Name + Web */
     {
       accessorKey: "company",
       header: ({ column }) => <DataTableColumnHeader column={column} title="Firma" />,
       cell: ({ row }) => {
         const lead = row.original;
+        const cleanWeb = lead.website?.replace(/^https?:\/\//, "").replace(/\/$/, "") ?? null;
         return (
-          <div className="flex items-center gap-2.5">
-            <div className="h-7 w-7 rounded-md bg-primary/8 flex items-center justify-center shrink-0 group-hover:bg-primary/12 transition-colors">
-              <Building2 className="h-3.5 w-3.5 text-primary" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-medium truncate max-w-[160px] leading-tight">
-                {lead.company}
-              </p>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex items-center gap-2.5 min-w-0">
+                <CompanyFavicon website={lead.website} size={7} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px] font-medium leading-tight text-foreground truncate">
+                    {lead.company}
+                  </p>
+                  {cleanWeb ? (
+                    <a
+                      href={lead.website?.startsWith("http") ? lead.website : `https://${cleanWeb}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] text-muted-foreground hover:text-primary truncate block leading-tight mt-0.5"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {cleanWeb}
+                    </a>
+                  ) : (lead.ceo_name || lead.name) ? (
+                    <p className="text-[11px] text-muted-foreground truncate leading-tight mt-0.5">
+                      {lead.ceo_name ?? lead.name}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="font-medium">{lead.company}</p>
               {(lead.ceo_name || lead.name) && (
-                <p className="text-[11px] text-muted-foreground truncate max-w-[160px] leading-tight mt-0.5">
-                  {lead.ceo_name ?? lead.name}
-                </p>
+                <p className="text-xs text-muted-foreground">{lead.ceo_name ?? lead.name}</p>
               )}
-            </div>
-          </div>
+            </TooltipContent>
+          </Tooltip>
         );
       },
       enableHiding: false,
-      size: 200,
+      size: 280,
     },
 
-    /* Branche */
+    /* Branche — plain text */
     {
       accessorKey: "industry",
       header: ({ column }) => <DataTableColumnHeader column={column} title="Branche" />,
-      cell: ({ getValue }) => (
-        <span className="text-xs text-muted-foreground">{(getValue() as string) ?? "—"}</span>
-      ),
-      size: 130,
+      cell: ({ getValue }) => {
+        const v = getValue() as string | null;
+        if (!v) return <span className="text-xs text-muted-foreground/50">—</span>;
+        return <span className="text-[12.5px] text-muted-foreground">{v}</span>;
+      },
+      size: 150,
+    },
+
+    /* Rechtsform */
+    {
+      accessorKey: "legal_form",
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Rechtsform" />,
+      cell: ({ getValue }) => {
+        const lf = getValue() as string | null;
+        if (!lf) return <span className="text-xs text-muted-foreground/50">—</span>;
+        return <span className="text-xs text-muted-foreground">{lf}</span>;
+      },
+      size: 120,
     },
 
     /* Ort */
@@ -255,7 +284,28 @@ export function createColumns(actions: ColumnActions): ColumnDef<Lead>[] {
         );
       },
       enableSorting: false,
-      size: 190,
+      size: 200,
+    },
+
+    /* Entscheider:in — ohne Avatar */
+    {
+      id: "ceo",
+      header: "Entscheider:in",
+      cell: ({ row }) => {
+        const lead = row.original;
+        const ceoName = lead.ceo_name ?? lead.name;
+        if (!ceoName) return <span className="text-xs text-muted-foreground/50">—</span>;
+        return (
+          <div className="min-w-0 leading-tight">
+            <div className="text-[13px] text-foreground truncate">{ceoName}</div>
+            {lead.ceo_title && (
+              <div className="text-[11px] text-muted-foreground truncate">{lead.ceo_title}</div>
+            )}
+          </div>
+        );
+      },
+      enableSorting: false,
+      size: 180,
     },
 
     /* Website */
@@ -289,7 +339,7 @@ export function createColumns(actions: ColumnActions): ColumnDef<Lead>[] {
       header: "Social",
       cell: ({ row }) => <SocialIcons lead={row.original} />,
       enableSorting: false,
-      size: 100,
+      size: 110,
     },
 
     /* Status */
@@ -299,10 +349,10 @@ export function createColumns(actions: ColumnActions): ColumnDef<Lead>[] {
       cell: ({ row }) => {
         const cfg = LEAD_STATUS_CONFIG[row.original.status];
         return (
-          <Badge variant="secondary" className={cn("text-[11px] font-medium px-2 py-0.5 gap-1.5", cfg.className)}>
-            <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", cfg.dot)} />
+          <span className={`badge-status ${cfg.className}`}>
+            <span className="dot" />
             {cfg.label}
-          </Badge>
+          </span>
         );
       },
       size: 130,
@@ -315,13 +365,40 @@ export function createColumns(actions: ColumnActions): ColumnDef<Lead>[] {
         const lead = row.original;
         const cfg = LEAD_STATUS_CONFIG[lead.status];
         return (
-          <div onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100 transition-opacity"
+               onClick={(e) => e.stopPropagation()}>
+            {lead.email && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <a
+                    href={`mailto:${lead.email}`}
+                    className="inline-grid place-items-center h-7 w-7 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  >
+                    <Mail className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  </a>
+                </TooltipTrigger>
+                <TooltipContent>E-Mail</TooltipContent>
+              </Tooltip>
+            )}
+            {lead.phone && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <a
+                    href={`tel:${lead.phone}`}
+                    className="inline-grid place-items-center h-7 w-7 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  >
+                    <PhoneIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  </a>
+                </TooltipTrigger>
+                <TooltipContent>Anrufen</TooltipContent>
+              </Tooltip>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity data-[state=open]:opacity-100"
+                  className="h-7 w-7 text-muted-foreground hover:text-foreground"
                 >
                   <MoreHorizontal className="h-3.5 w-3.5" />
                   <span className="sr-only">Aktionen</span>
@@ -373,7 +450,7 @@ export function createColumns(actions: ColumnActions): ColumnDef<Lead>[] {
       },
       enableSorting: false,
       enableHiding: false,
-      size: 48,
+      size: 110,
     },
   ];
 }

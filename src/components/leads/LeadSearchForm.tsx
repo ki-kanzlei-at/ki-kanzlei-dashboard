@@ -3,14 +3,11 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Search, Loader2 } from "lucide-react";
+import { Search, Loader2, Sparkles, Upload, Layers, MapPin, Globe2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Card,
-  CardContent,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import {
   Form,
   FormControl,
@@ -28,20 +25,22 @@ import {
 } from "@/components/ui/select";
 import {
   COMPANY_TYPE_OPTIONS,
-  DACH_COUNTRIES,
   getRegionOptions,
   getRegionLabel,
 } from "@/types/leads";
+import { DACH_COUNTRIES } from "@/lib/countries";
 import { FilterCombobox } from "@/components/leads/FilterCombobox";
 
 const searchSchema = z
   .object({
-    country:      z.string().min(2),
+    country:      z.enum(["AT", "DE", "CH"]),
     query:        z.string().optional(),
     locations:    z.array(z.string()).optional(),
     city:         z.string().optional(),
     company_type: z.string().optional(),
     require_ceo:  z.boolean().optional(),
+    require_email: z.boolean().optional(),
+    require_website: z.boolean().optional(),
   })
   .superRefine((data, ctx) => {
     const hasQuery     = data.query && data.query.trim().length >= 2;
@@ -76,16 +75,24 @@ interface LeadSearchFormProps {
   defaultRequireCeo?: boolean;
 }
 
+type DachCountry = "AT" | "DE" | "CH";
+
+function asDach(country: string | undefined): DachCountry {
+  return country === "DE" || country === "CH" ? country : "AT";
+}
+
 export function LeadSearchForm({ onSubmit, isSearching, defaultCountry, defaultRequireCeo }: LeadSearchFormProps) {
   const form = useForm<SearchFormValues>({
     resolver: zodResolver(searchSchema),
     defaultValues: {
-      country: defaultCountry || "AT",
+      country: asDach(defaultCountry),
       query: "",
       locations: [],
       city: "",
       company_type: "all",
       require_ceo: defaultRequireCeo ?? false,
+      require_email: false,
+      require_website: false,
     },
   });
 
@@ -95,7 +102,7 @@ export function LeadSearchForm({ onSubmit, isSearching, defaultCountry, defaultR
   const regionLabel = getRegionLabel(selectedCountry);
 
   function handleCountryChange(value: string) {
-    form.setValue("country", value);
+    form.setValue("country", asDach(value));
     form.setValue("locations", []);
     form.clearErrors();
   }
@@ -112,183 +119,244 @@ export function LeadSearchForm({ onSubmit, isSearching, defaultCountry, defaultR
       country: values.country,
       locations: [],
       require_ceo: values.require_ceo,
+      require_email: values.require_email,
+      require_website: values.require_website,
     });
   }
 
-  // unused — FilterCombobox builds its own label from options
-
   return (
     <Form {...form}>
-      <Card>
-        <CardContent className="pt-5">
-          <div className="space-y-3">
+      <Card className="border-border/70 shadow-none">
+        <CardHeader className="pb-4 border-b border-border/70">
+          <CardTitle className="text-base font-semibold tracking-tight">Neue Suche</CardTitle>
+          <CardDescription className="text-[13px]">
+            Branche, Region und Filter — wir finden die passenden Mandanten.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-4 space-y-4">
 
-            {/* Row 1: Branche + Land */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <FormField
-                control={form.control}
-                name="query"
-                render={({ field }) => (
-                  <FormItem className="min-w-0">
-                    <FormLabel>Branche *</FormLabel>
-                    <FormControl>
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/40" />
-                        <Input
-                          placeholder="z.B. Steuerberater, Anwalt, Arzt"
-                          className="pl-9"
-                          {...field}
-                          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleSubmit(); } }}
-                        />
-                      </div>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormItem className="min-w-0">
-                <FormLabel>Land *</FormLabel>
-                <Select value={selectedCountry} onValueChange={handleCountryChange}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {DACH_COUNTRIES.map((c) => (
-                      <SelectItem key={c.value} value={c.value}>
-                        {c.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </FormItem>
-            </div>
-
-            {/* Row 2: Region (Multi) + Stadt */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <FormField
-                control={form.control}
-                name="locations"
-                render={({ field }) => (
-                  <FormItem className="min-w-0">
-                    <FormLabel>
-                      {regionLabel}
-                      {selectedLocations.length > 1 && (
-                        <span className="ml-1.5 text-xs text-primary font-normal">
-                          → {selectedLocations.length} Suchaufträge
-                        </span>
-                      )}
-                    </FormLabel>
-                    <FilterCombobox
-                      multi
-                      value={field.value ?? []}
-                      onChange={(val) => {
-                        field.onChange(val);
-                        form.clearErrors("locations");
-                      }}
-                      options={regionOptions
-                        .filter((o) => o.value !== "all")
-                        .map((o) => ({ value: o.value, label: o.label }))}
-                      placeholder={`${regionLabel === "Kanton" ? "Kanton" : "Bundesland"} wählen`}
-                      searchPlaceholder={`${regionLabel} suchen…`}
-                      emptyText={`Kein ${regionLabel} gefunden`}
-                      className="w-full"
-                    />
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="city"
-                render={({ field }) => (
-                  <FormItem className="min-w-0">
-                    <FormLabel>Stadt / Ort</FormLabel>
-                    <FormControl>
+          {/* Hero grid: Branche | Region | Land | Button */}
+          <div className="grid grid-cols-1 md:grid-cols-[2fr_1.3fr_0.9fr_auto] gap-3 items-end">
+            <FormField
+              control={form.control}
+              name="query"
+              render={({ field }) => (
+                <FormItem className="min-w-0">
+                  <FormLabel className="text-xs font-medium">Branche</FormLabel>
+                  <FormControl>
+                    <div className="relative flex items-center">
+                      <Search className="absolute left-3 h-3.5 w-3.5 text-muted-foreground/60 pointer-events-none" strokeWidth={1.75} />
                       <Input
-                        placeholder="z.B. Salzburg"
+                        placeholder="z. B. Steuerberater, Anwalt, Arzt …"
+                        className="pl-9 h-9 bg-card"
                         {...field}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleSubmit(); } }}
                       />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-            </div>
-
-            {/* Row 3: Rechtsform */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <FormField
-                control={form.control}
-                name="company_type"
-                render={({ field }) => (
-                  <FormItem className="min-w-0">
-                    <FormLabel>Rechtsform</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      value={field.value || "all"}
-                    >
-                      <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Alle Rechtsformen" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {COMPANY_TYPE_OPTIONS.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </FormItem>
-                )}
-              />
-            </div>
-
-            {/* Row 4: Checkbox + Button */}
-            <div className="flex items-center justify-between pt-2">
-              <FormField
-                control={form.control}
-                name="require_ceo"
-                render={({ field }) => (
-                  <FormItem className="space-y-0">
-                    <div className="flex items-center gap-2">
-                      <FormControl>
-                        <Checkbox
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                          id="require-ceo"
-                        />
-                      </FormControl>
-                      <label htmlFor="require-ceo" className="text-sm cursor-pointer leading-none">
-                        Nur mit Geschäftsführer
-                      </label>
                     </div>
-                  </FormItem>
-                )}
-              />
+                  </FormControl>
+                  <FormMessage className="text-[11px]" />
+                </FormItem>
+              )}
+            />
 
+            <FormField
+              control={form.control}
+              name="locations"
+              render={({ field }) => (
+                <FormItem className="min-w-0">
+                  <FormLabel className="text-xs font-medium flex items-center gap-1.5">
+                    <MapPin className="h-3 w-3 text-muted-foreground/70" strokeWidth={1.75} />
+                    {regionLabel}
+                    {selectedLocations.length > 1 && (
+                      <span className="ml-auto text-[10.5px] text-primary font-normal">
+                        {selectedLocations.length} Jobs
+                      </span>
+                    )}
+                  </FormLabel>
+                  <FilterCombobox
+                    multi
+                    value={field.value ?? []}
+                    onChange={(val) => {
+                      field.onChange(val);
+                      form.clearErrors("locations");
+                    }}
+                    options={regionOptions
+                      .filter((o) => o.value !== "all")
+                      .map((o) => ({ value: o.value, label: o.label }))}
+                    placeholder={`${regionLabel} wählen`}
+                    searchPlaceholder={`${regionLabel} suchen…`}
+                    emptyText={`Kein ${regionLabel} gefunden`}
+                    className="w-full"
+                  />
+                  <FormMessage className="text-[11px]" />
+                </FormItem>
+              )}
+            />
+
+            <FormItem className="min-w-0">
+              <FormLabel className="text-xs font-medium flex items-center gap-1.5">
+                <Globe2 className="h-3 w-3 text-muted-foreground/70" strokeWidth={1.75} />
+                Land
+              </FormLabel>
+              <FilterCombobox
+                value={selectedCountry || "AT"}
+                onChange={(val) => handleCountryChange(val || "AT")}
+                options={DACH_COUNTRIES.map((c) => ({
+                  value: c.value,
+                  label: c.label,
+                }))}
+                placeholder="Land wählen"
+                searchPlaceholder="Land suchen…"
+                emptyText="Kein Land gefunden"
+                className="w-full"
+              />
+            </FormItem>
+
+            <div className="flex items-end md:pb-0">
               <Button
                 type="button"
                 disabled={isSearching}
-                className="gap-2"
+                className="h-9 px-4 gap-2 font-medium w-full md:min-w-[160px]"
                 onClick={handleSubmit}
               >
                 {isSearching ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Sucht …
+                  </>
                 ) : (
-                  <Search className="h-4 w-4" />
+                  <>
+                    <Sparkles className="h-3.5 w-3.5" strokeWidth={1.75} />
+                    {selectedLocations.length > 1 ? `${selectedLocations.length} Suchen starten` : "Suche starten"}
+                  </>
                 )}
-                {isSearching
-                  ? "Suche läuft…"
-                  : selectedLocations.length > 1
-                    ? `${selectedLocations.length} Suchen starten`
-                    : "Leads suchen"}
               </Button>
             </div>
-
           </div>
+
+          {/* Optionaler erweiterter Block: Stadt + Rechtsform */}
+          <div className="grid grid-cols-1 md:grid-cols-[2fr_1.3fr_0.9fr] gap-3 items-end">
+            <FormField
+              control={form.control}
+              name="city"
+              render={({ field }) => (
+                <FormItem className="min-w-0">
+                  <FormLabel className="text-xs font-medium text-muted-foreground">Stadt / Ort (optional)</FormLabel>
+                  <FormControl>
+                    <Input placeholder="z. B. Salzburg, Wien, Zürich" className="h-9 bg-card text-sm" {...field} />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="company_type"
+              render={({ field }) => (
+                <FormItem className="min-w-0">
+                  <FormLabel className="text-xs font-medium text-muted-foreground">Rechtsform</FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    value={field.value || "all"}
+                  >
+                    <FormControl>
+                      <SelectTrigger className="h-9 w-full text-sm bg-card">
+                        <SelectValue placeholder="Alle Rechtsformen" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {COMPANY_TYPE_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value} className="text-sm">
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FormItem>
+              )}
+            />
+          </div>
+
+          {/* Footer: Toggles + Vorlagen / CSV Import */}
+          <div className="flex flex-wrap items-center gap-4 pt-3 border-t border-border/70 text-[13px] text-muted-foreground">
+            <FormField
+              control={form.control}
+              name="require_ceo"
+              render={({ field }) => (
+                <FormItem className="space-y-0">
+                  <div className="flex items-center gap-2">
+                    <FormControl>
+                      <Checkbox
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        id="require-ceo"
+                        className="h-3.5 w-3.5"
+                      />
+                    </FormControl>
+                    <label htmlFor="require-ceo" className="text-[12.5px] cursor-pointer leading-none text-foreground">
+                      Nur mit Geschäftsführer:in
+                    </label>
+                  </div>
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="require_email"
+              render={({ field }) => (
+                <FormItem className="space-y-0">
+                  <div className="flex items-center gap-2">
+                    <FormControl>
+                      <Checkbox
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        id="require-email"
+                        className="h-3.5 w-3.5"
+                      />
+                    </FormControl>
+                    <label htmlFor="require-email" className="text-[12.5px] cursor-pointer leading-none text-foreground">
+                      Mit verifizierter E-Mail
+                    </label>
+                  </div>
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="require_website"
+              render={({ field }) => (
+                <FormItem className="space-y-0">
+                  <div className="flex items-center gap-2">
+                    <FormControl>
+                      <Checkbox
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        id="require-website"
+                        className="h-3.5 w-3.5"
+                      />
+                    </FormControl>
+                    <label htmlFor="require-website" className="text-[12.5px] cursor-pointer leading-none text-foreground">
+                      Mit Website
+                    </label>
+                  </div>
+                </FormItem>
+              )}
+            />
+
+            <div className="ml-auto flex items-center gap-2">
+              <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 text-xs font-medium" disabled>
+                <Layers className="h-3.5 w-3.5" strokeWidth={1.75} />
+                Vorlagen
+              </Button>
+              <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 text-xs font-medium" disabled>
+                <Upload className="h-3.5 w-3.5" strokeWidth={1.75} />
+                CSV importieren
+              </Button>
+            </div>
+          </div>
+
         </CardContent>
       </Card>
     </Form>

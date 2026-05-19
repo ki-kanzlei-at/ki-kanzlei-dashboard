@@ -11,6 +11,10 @@ import {
   MapPin,
   Share2,
   User,
+  Mail,
+  Send,
+  ChevronDown,
+  ExternalLink,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -25,6 +29,7 @@ import {
 } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { CompanyFavicon } from "./CompanyFavicon";
 import {
   Form,
   FormControl,
@@ -40,21 +45,43 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
+
+/* ── Bundesland labels ── */
+const STATE_LABELS: Record<string, string> = {
+  W: "Wien", N: "Niederösterreich", O: "Oberösterreich", S: "Salzburg",
+  T: "Tirol", V: "Vorarlberg", St: "Steiermark", K: "Kärnten", B: "Burgenland",
+};
+
+/* ── Status badge config ── */
+const STATUS_BADGE_CLASS: Record<string, string> = {
+  new: "status-new",
+  interested: "status-interested",
+  contacted: "status-contacted",
+  converted: "status-converted",
+  not_interested: "status-not_interested",
+};
 
 import type { Lead, LeadStatus } from "@/types/leads";
 import { COUNTRY_OPTIONS } from "@/types/leads";
 import { IndustryCombobox } from "@/components/leads/IndustryCombobox";
 
 const STATUS_OPTIONS: { value: LeadStatus; label: string; dot: string }[] = [
-  { value: "new",            label: "Neu",            dot: "bg-primary/50" },
-  { value: "contacted",      label: "Kontaktiert",    dot: "bg-amber-500" },
-  { value: "interested",     label: "Interessiert",   dot: "bg-emerald-500" },
+  { value: "new",            label: "Neu",            dot: "bg-sky-500" },
+  { value: "contacted",      label: "Kontaktiert",    dot: "bg-blue-500" },
+  { value: "interested",     label: "Interessiert",   dot: "bg-primary" },
   { value: "not_interested", label: "Kein Interesse", dot: "bg-muted-foreground/50" },
-  { value: "converted",      label: "Konvertiert",    dot: "bg-primary" },
+  { value: "converted",      label: "Konvertiert",    dot: "bg-indigo-600" },
 ];
 
 const GENDER_OPTIONS = [
@@ -146,7 +173,6 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved }: LeadEditShe
         social_linkedin:      lead.social_linkedin ?? "",
         social_facebook:      lead.social_facebook ?? "",
         social_instagram:     lead.social_instagram ?? "",
-        social_xing:          lead.social_xing ?? "",
         social_twitter:       lead.social_twitter ?? "",
         social_youtube:       lead.social_youtube ?? "",
         social_tiktok:        lead.social_tiktok ?? "",
@@ -209,59 +235,149 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved }: LeadEditShe
   }
 
   const currentStatus = STATUS_OPTIONS.find((s) => s.value === form.watch("status"));
+  const cleanWeb = lead?.website?.replace(/^https?:\/\//, "").replace(/\/$/, "") ?? null;
+  const stateLabel = lead?.state ? (STATE_LABELS[lead.state] ?? lead.state) : null;
+
+  async function handleStatusChange(newStatus: LeadStatus) {
+    if (!lead) return;
+    form.setValue("status", newStatus);
+    try {
+      const res = await fetch(`/api/leads/${lead.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success(`Status auf „${STATUS_OPTIONS.find((s) => s.value === newStatus)?.label}" geändert`);
+      onSaved();
+    } catch {
+      toast.error("Status konnte nicht geändert werden");
+    }
+  }
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-[640px] sm:w-[720px] flex flex-col p-0 gap-0">
+      <SheetContent side="right" className="leads-v3 w-full sm:max-w-[600px] lg:max-w-[640px] flex flex-col p-0 gap-0">
 
-        {/* Header */}
-        <SheetHeader className="px-6 pt-5 pb-4 border-b shrink-0">
-          <div className="flex items-start gap-3">
-            <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-              <Building2 className="h-5 w-5 text-primary" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <SheetTitle className="text-base truncate leading-tight">
+        {/* Header — v3 style */}
+        <SheetHeader className="px-5 pt-4 pb-4 border-b border-border shrink-0">
+          <div className="flex items-start gap-3.5">
+            <CompanyFavicon website={lead?.website ?? null} size={10} />
+            <div className="min-w-0 flex-1 space-y-1">
+              <SheetTitle className="text-[17px] font-semibold tracking-tight truncate leading-tight">
                 {lead?.company ?? "Lead bearbeiten"}
               </SheetTitle>
-              <SheetDescription className="text-xs mt-0.5">
-                {lead?.city ? `${lead.city} · ` : ""}Daten bearbeiten und speichern
+              <SheetDescription asChild>
+                <div className="flex items-center gap-2 flex-wrap text-[12.5px] text-muted-foreground">
+                  {lead?.industry && <span>{lead.industry}</span>}
+                  {cleanWeb && (
+                    <>
+                      {lead?.industry && <span className="opacity-60">·</span>}
+                      <a
+                        href={lead?.website?.startsWith("http") ? lead.website : `https://${cleanWeb}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-0.5 hover:text-primary"
+                      >
+                        {cleanWeb}
+                        <ExternalLink className="h-2.5 w-2.5 ml-0.5" strokeWidth={1.75} />
+                      </a>
+                    </>
+                  )}
+                  {lead?.city && (
+                    <>
+                      <span className="opacity-60">·</span>
+                      <span>{lead.city}{stateLabel ? `, ${stateLabel}` : ""}</span>
+                    </>
+                  )}
+                </div>
               </SheetDescription>
             </div>
             {currentStatus && (
-              <Badge variant="secondary" className="shrink-0 text-xs font-medium gap-1.5">
-                <span className={`h-1.5 w-1.5 rounded-full ${currentStatus.dot}`} />
+              <span className={cn("badge-status shrink-0", STATUS_BADGE_CLASS[currentStatus.value])}>
+                <span className="dot" />
                 {currentStatus.label}
-              </Badge>
+              </span>
             )}
           </div>
         </SheetHeader>
+
+        {/* Sheet Toolbar — Quick actions */}
+        <div className="px-5 py-2.5 border-b border-border flex items-center gap-2 flex-wrap bg-muted/30">
+          {lead?.email && (
+            <Button asChild size="sm" className="h-8 gap-1.5 text-xs font-medium">
+              <a href={`mailto:${lead.email}`}>
+                <Mail className="h-3.5 w-3.5" strokeWidth={1.75} />
+                E-Mail senden
+              </a>
+            </Button>
+          )}
+          {lead?.phone && (
+            <Button asChild variant="outline" size="sm" className="h-8 gap-1.5 text-xs font-medium">
+              <a href={`tel:${lead.phone}`}>
+                <Phone className="h-3.5 w-3.5" strokeWidth={1.75} />
+                Anrufen
+              </a>
+            </Button>
+          )}
+          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs font-medium" disabled>
+            <Send className="h-3.5 w-3.5" strokeWidth={1.75} />
+            Zu Kampagne
+          </Button>
+          <div className="ml-auto">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs font-medium">
+                  Status ändern
+                  <ChevronDown className="h-3 w-3 opacity-70" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">
+                  Status setzen auf…
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {STATUS_OPTIONS.map((opt) => (
+                  <DropdownMenuItem
+                    key={opt.value}
+                    className="text-xs gap-2 cursor-pointer"
+                    disabled={opt.value === currentStatus?.value}
+                    onClick={() => handleStatusChange(opt.value)}
+                  >
+                    <span className={`h-2 w-2 rounded-full shrink-0 ${opt.dot}`} />
+                    {opt.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
 
         {/* Form */}
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col flex-1 min-h-0">
 
             <Tabs defaultValue="company" className="flex flex-col flex-1 min-h-0">
-              <div className="px-6 pt-3 pb-0 shrink-0 border-b">
-                <TabsList className="h-8 w-full grid grid-cols-5 mb-0">
-                  <TabsTrigger value="company" className="text-[11px] gap-1">
-                    <Building2 className="h-3 w-3" />
+              <div className="px-6 pt-2 shrink-0 border-b">
+                <TabsList variant="line" className="h-10 w-full grid grid-cols-5 mb-0">
+                  <TabsTrigger value="company" className="text-xs gap-1.5">
+                    <Building2 className="h-3.5 w-3.5" />
                     Firma
                   </TabsTrigger>
-                  <TabsTrigger value="contact_person" className="text-[11px] gap-1">
-                    <User className="h-3 w-3" />
+                  <TabsTrigger value="contact_person" className="text-xs gap-1.5">
+                    <User className="h-3.5 w-3.5" />
                     Person
                   </TabsTrigger>
-                  <TabsTrigger value="contact" className="text-[11px] gap-1">
-                    <Phone className="h-3 w-3" />
+                  <TabsTrigger value="contact" className="text-xs gap-1.5">
+                    <Phone className="h-3.5 w-3.5" />
                     Kontakt
                   </TabsTrigger>
-                  <TabsTrigger value="address" className="text-[11px] gap-1">
-                    <MapPin className="h-3 w-3" />
+                  <TabsTrigger value="address" className="text-xs gap-1.5">
+                    <MapPin className="h-3.5 w-3.5" />
                     Adresse
                   </TabsTrigger>
-                  <TabsTrigger value="social" className="text-[11px] gap-1">
-                    <Share2 className="h-3 w-3" />
+                  <TabsTrigger value="social" className="text-xs gap-1.5">
+                    <Share2 className="h-3.5 w-3.5" />
                     Social
                   </TabsTrigger>
                 </TabsList>
@@ -315,8 +431,6 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved }: LeadEditShe
                       </FormItem>
                     )}
                   />
-
-                  <Separator />
 
                   <FormField
                     control={form.control}
@@ -435,8 +549,6 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved }: LeadEditShe
                       )}
                     />
                   </div>
-
-                  <Separator />
 
                   <FormField
                     control={form.control}

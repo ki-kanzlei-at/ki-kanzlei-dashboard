@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createSearchJob, getSearchJobs } from "@/lib/supabase/leads";
-import { runEnrichmentPipeline } from "@/lib/enrichment/pipeline";
+import { enqueueJob } from "@/lib/jobs/scheduler";
 
 /* ── GET: Alle Search Jobs des Users abrufen ── */
 export async function GET() {
@@ -61,6 +61,8 @@ export async function POST(request: NextRequest) {
       company_type?: string;
       city?: string;
       require_ceo?: boolean;
+      require_email?: boolean;
+      require_website?: boolean;
     };
     try {
       body = await request.json();
@@ -71,7 +73,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { query, location, country = "AT", company_type = "all", city, require_ceo = false } = body;
+    const {
+      query,
+      location,
+      country = "AT",
+      company_type = "all",
+      city,
+      require_ceo = false,
+      require_email = false,
+      require_website = false,
+    } = body;
 
     if (!query || typeof query !== "string" || query.trim().length === 0) {
       return NextResponse.json(
@@ -104,8 +115,8 @@ export async function POST(request: NextRequest) {
       country,
     });
 
-    // Enrichment Pipeline starten (fire-and-forget)
-    runEnrichmentPipeline({
+    // Über Scheduler einreihen — startet direkt oder bleibt pending (Queue)
+    const state = enqueueJob({
       jobId: searchJob.id,
       userId: user.id,
       query: query.trim(),
@@ -114,12 +125,12 @@ export async function POST(request: NextRequest) {
       companyType: company_type,
       city: hasCity ? city!.trim() : undefined,
       requireCeo: require_ceo,
-    }).catch((err) => {
-      console.error(`[API] Pipeline-Fehler für Job ${searchJob.id}:`, err);
+      requireEmail: require_email,
+      requireWebsite: require_website,
     });
 
     return NextResponse.json(
-      { data: searchJob },
+      { data: searchJob, queued: state === "queued" },
       { status: 201 },
     );
   } catch (error) {

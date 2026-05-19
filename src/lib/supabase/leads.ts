@@ -128,6 +128,11 @@ export async function getLeads(
     query = query.in("id", filters.ids);
   }
 
+  /* Suchauftrag-Filter: alle Leads aus einem konkreten Job */
+  if (filters.search_job_id) {
+    query = query.eq("search_job_id", filters.search_job_id);
+  }
+
   /* Volltextsuche über mehrere Spalten */
   if (filters.search) {
     const term = `%${filters.search}%`;

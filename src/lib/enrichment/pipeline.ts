@@ -1,13 +1,51 @@
 /* ── Enrichment Pipeline ──
  * Lead Enrichment Pipeline:
- * Google Places → Website Scraping → Gemini AI (mit Google Search Grounding) → Supabase Insert
+ * Google Places → Website Scraping → Gemini AI (mit Google Search Grounding via tools API) → Supabase Insert
  */
 
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { extractWithGemini, buildCeoName } from "./gemini";
-import { postalCodeToBundesland } from "@/lib/bundesland";
-import type { GeminiInput } from "./gemini";
+import { extractWithGemini, buildCeoName, verifyCeoOrNull, verifyEmailOrNull } from "./gemini";
+import { getSearchBoxes, type BoundingBox } from "./regions";
+import { placeMatchesRegion } from "./plz-region";
+import type { ExtractionStats, GeminiInput } from "./gemini";
 import type { LeadInsert } from "@/types/leads";
+
+/* ── Telemetry: Pro-Job-Counter für Kosten und Performance-Analyse ── */
+interface JobStats {
+  googlePlacesPages: number;     // einzelne Page-Calls (×0.017€ Text Search Pro)
+  geminiStage1: number;          // ~$0.001 pro Call (flash)
+  geminiStage2: number;          // ~$0.035 pro Call (flash + grounding)
+  scrapes: number;
+  inserts: number;
+  duplicatesSkipped: number;
+  noEmailSkipped: number;
+  noCeoSkipped: number;
+  geminiSkipped: number;         // Pre-Check verhinderte Gemini-Call
+  boxSplits: number;             // adaptive Splittings
+  offRegionSkipped: number;      // PLZ liegt in anderer Region (Bounding-Box-Bleed)
+}
+function newJobStats(): JobStats {
+  return {
+    googlePlacesPages: 0,
+    geminiStage1: 0,
+    geminiStage2: 0,
+    scrapes: 0,
+    inserts: 0,
+    duplicatesSkipped: 0,
+    noEmailSkipped: 0,
+    noCeoSkipped: 0,
+    geminiSkipped: 0,
+    boxSplits: 0,
+    offRegionSkipped: 0,
+  };
+}
+function estimateCostCents(s: JobStats): { google: number; gemini: number; total: number } {
+  // Text Search (Pro) ≈ €0.017/Call ≈ 1.7 cent (Google "SKU: Text Search Pro" 2026)
+  const google = s.googlePlacesPages * 1.7;
+  // Gemini 2.5-flash: Stage 1 ~ €0.001 = 0.1 cent, Stage 2 (mit Grounding) ~ €0.035 = 3.5 cent
+  const gemini = s.geminiStage1 * 0.1 + s.geminiStage2 * 3.5;
+  return { google: Math.round(google), gemini: Math.round(gemini), total: Math.round(google + gemini) };
+}
 
 /* ══════════════════════════════════════════════════════
    Types
@@ -22,65 +60,77 @@ interface PipelineParams {
   companyType?: string;
   city?: string;
   requireCeo?: boolean;
+  requireEmail?: boolean;
+  requireWebsite?: boolean;
 }
 
-/* ── Region → Städte Mappings (AT / DE / CH) ── */
-const REGION_CITIES: Record<string, string[]> = {
-  // ── Österreich (9 Bundesländer) ──
-  "Wien": ["Wien Innere Stadt", "Wien Leopoldstadt", "Wien Landstraße", "Wien Favoriten", "Wien Margareten", "Wien Mariahilf", "Wien Neubau", "Wien Josefstadt", "Wien Döbling", "Wien Floridsdorf", "Wien Ottakring", "Wien Hietzing"],
-  "Niederösterreich": ["St. Pölten", "Wiener Neustadt", "Baden", "Krems an der Donau", "Amstetten", "Mödling", "Korneuburg", "Tulln", "Zwettl", "Mistelbach", "Hollabrunn", "Waidhofen an der Ybbs", "Stockerau", "Klosterneuburg", "Schwechat"],
-  "Oberösterreich": ["Linz", "Wels", "Steyr", "Leonding", "Traun", "Braunau am Inn", "Ried im Innkreis", "Vöcklabruck", "Gmunden", "Enns", "Marchtrenk", "Bad Ischl", "Schärding", "Rohrbach", "Freistadt"],
-  "Steiermark": ["Graz", "Leoben", "Kapfenberg", "Bruck an der Mur", "Leibnitz", "Feldbach", "Weiz", "Hartberg", "Judenburg", "Voitsberg", "Deutschlandsberg", "Murau", "Liezen", "Fürstenfeld", "Knittelfeld"],
-  "Salzburg": ["Salzburg", "Hallein", "Wals-Siezenheim", "Seekirchen", "Saalfelden", "Bischofshofen", "St. Johann im Pongau", "Zell am See", "Straßwalchen", "Oberndorf bei Salzburg", "Mittersill", "Neumarkt am Wallersee", "Radstadt"],
-  "Tirol": ["Innsbruck", "Kufstein", "Schwaz", "Hall in Tirol", "Wörgl", "Lienz", "Telfs", "Imst", "Landeck", "Reutte", "Kitzbühel", "St. Johann in Tirol", "Jenbach", "Zirl", "Rum"],
-  "Kärnten": ["Klagenfurt", "Villach", "Wolfsberg", "Spittal an der Drau", "Feldkirchen", "St. Veit an der Glan", "Völkermarkt", "Hermagor", "Althofen", "Ferlach", "Bad St. Leonhard", "Friesach", "Gmünd", "Radenthein"],
-  "Vorarlberg": ["Bregenz", "Dornbirn", "Feldkirch", "Bludenz", "Hohenems", "Lustenau", "Hard", "Rankweil", "Götzis", "Lauterach", "Wolfurt", "Schwarzach"],
-  "Burgenland": ["Eisenstadt", "Oberwart", "Neusiedl am See", "Güssing", "Jennersdorf", "Mattersburg", "Oberpullendorf", "Pinkafeld", "Stegersbach", "Deutschkreutz", "Rust", "Frauenkirchen"],
-  // ── Deutschland (16 Bundesländer) ──
-  "Bayern": ["München", "Nürnberg", "Augsburg", "Regensburg", "Würzburg", "Ingolstadt", "Fürth", "Erlangen", "Bayreuth", "Landshut", "Rosenheim", "Bamberg", "Aschaffenburg", "Passau", "Kempten"],
-  "Nordrhein-Westfalen": ["Köln", "Düsseldorf", "Dortmund", "Essen", "Duisburg", "Bochum", "Wuppertal", "Bielefeld", "Bonn", "Münster", "Aachen", "Krefeld", "Mönchengladbach", "Gelsenkirchen", "Oberhausen"],
-  "Baden-Württemberg": ["Stuttgart", "Mannheim", "Karlsruhe", "Freiburg im Breisgau", "Heidelberg", "Ulm", "Heilbronn", "Pforzheim", "Reutlingen", "Konstanz", "Tübingen", "Offenburg", "Villingen-Schwenningen", "Esslingen", "Ludwigsburg"],
-  "Berlin": ["Berlin Mitte", "Berlin Charlottenburg", "Berlin Kreuzberg", "Berlin Steglitz", "Berlin Spandau", "Berlin Tempelhof", "Berlin Pankow", "Berlin Neukölln", "Berlin Lichtenberg", "Berlin Reinickendorf"],
-  "Hamburg": ["Hamburg Mitte", "Hamburg Altona", "Hamburg Eimsbüttel", "Hamburg Wandsbek", "Hamburg Bergedorf", "Hamburg Harburg", "Hamburg Nord", "Hamburg Blankenese", "Hamburg Barmbek", "Hamburg Winterhude"],
-  "Hessen": ["Frankfurt am Main", "Wiesbaden", "Kassel", "Darmstadt", "Hanau", "Offenbach am Main", "Marburg", "Gießen", "Fulda", "Wetzlar", "Bad Homburg", "Rüsselsheim", "Limburg an der Lahn"],
-  "Niedersachsen": ["Hannover", "Braunschweig", "Osnabrück", "Oldenburg", "Göttingen", "Wolfsburg", "Salzgitter", "Hildesheim", "Lüneburg", "Hameln", "Celle", "Delmenhorst", "Emden", "Lingen", "Wilhelmshaven"],
-  "Rheinland-Pfalz": ["Mainz", "Ludwigshafen", "Koblenz", "Trier", "Kaiserslautern", "Worms", "Neuwied", "Neustadt an der Weinstraße", "Speyer", "Frankenthal", "Bad Kreuznach", "Andernach"],
-  "Sachsen": ["Leipzig", "Dresden", "Chemnitz", "Zwickau", "Plauen", "Görlitz", "Freiberg", "Bautzen", "Pirna", "Meißen", "Döbeln", "Riesa"],
-  "Thüringen": ["Erfurt", "Jena", "Gera", "Weimar", "Gotha", "Suhl", "Nordhausen", "Eisenach", "Altenburg", "Mühlhausen", "Ilmenau", "Saalfeld"],
-  "Brandenburg": ["Potsdam", "Cottbus", "Brandenburg an der Havel", "Frankfurt an der Oder", "Oranienburg", "Eberswalde", "Bernau", "Falkensee", "Schwedt", "Königs Wusterhausen", "Strausberg", "Neuruppin"],
-  "Sachsen-Anhalt": ["Halle", "Magdeburg", "Dessau-Roßlau", "Lutherstadt Wittenberg", "Stendal", "Merseburg", "Halberstadt", "Wernigerode", "Naumburg", "Bernburg", "Quedlinburg", "Schönebeck"],
-  "Schleswig-Holstein": ["Kiel", "Lübeck", "Flensburg", "Neumünster", "Norderstedt", "Elmshorn", "Pinneberg", "Itzehoe", "Wedel", "Rendsburg", "Husum", "Bad Oldesloe"],
-  "Mecklenburg-Vorpommern": ["Rostock", "Schwerin", "Neubrandenburg", "Stralsund", "Greifswald", "Wismar", "Güstrow", "Waren", "Anklam", "Parchim", "Bergen auf Rügen"],
-  "Saarland": ["Saarbrücken", "Neunkirchen", "Homburg", "Völklingen", "Saarlouis", "Merzig", "St. Ingbert", "St. Wendel", "Dillingen", "Lebach"],
-  "Bremen": ["Bremen", "Bremerhaven", "Bremen-Nord", "Vegesack"],
-  // ── Schweiz (alle 26 Kantone) ──
-  "Zürich": ["Zürich", "Winterthur", "Uster", "Dübendorf", "Dietikon", "Kloten", "Regensdorf", "Wädenswil", "Horgen", "Bülach"],
-  "Bern": ["Bern", "Biel", "Thun", "Köniz", "Ostermundigen", "Steffisburg", "Langenthal", "Burgdorf", "Spiez", "Interlaken"],
-  "Luzern": ["Luzern", "Kriens", "Emmen", "Horw", "Littau", "Sursee", "Willisau", "Hochdorf"],
-  "Uri": ["Altdorf", "Erstfeld", "Bürglen", "Schattdorf", "Flüelen"],
-  "Schwyz": ["Schwyz", "Einsiedeln", "Freienbach", "Küssnacht", "Arth", "Lachen"],
-  "Obwalden": ["Sarnen", "Kerns", "Alpnach", "Engelberg", "Sachseln"],
-  "Nidwalden": ["Stans", "Hergiswil", "Buochs", "Ennetbürgen", "Beckenried"],
-  "Glarus": ["Glarus", "Näfels", "Netstal", "Ennenda", "Mollis"],
-  "Zug": ["Zug", "Baar", "Cham", "Steinhausen", "Risch-Rotkreuz", "Hünenberg"],
-  "Freiburg": ["Freiburg", "Bulle", "Villars-sur-Glâne", "Düdingen", "Murten", "Marly"],
-  "Solothurn": ["Solothurn", "Olten", "Grenchen", "Bettlach", "Biberist", "Zuchwil"],
-  "Basel-Stadt": ["Basel", "Riehen", "Bettingen"],
-  "Basel-Landschaft": ["Liestal", "Allschwil", "Reinach", "Binningen", "Birsfelden", "Arlesheim", "Muttenz", "Pratteln"],
-  "Schaffhausen": ["Schaffhausen", "Neuhausen am Rheinfall", "Thayngen", "Beringen"],
-  "Appenzell Ausserrhoden": ["Herisau", "Teufen", "Speicher", "Heiden", "Bühler"],
-  "Appenzell Innerrhoden": ["Appenzell", "Oberegg", "Rüte", "Gonten"],
-  "St. Gallen": ["St. Gallen", "Rapperswil-Jona", "Wil", "Gossau", "Arbon", "Rorschach", "Buchs", "Altstätten"],
-  "Graubünden": ["Chur", "Davos", "St. Moritz", "Arosa", "Ilanz", "Landquart", "Thusis"],
-  "Aargau": ["Aarau", "Baden", "Wettingen", "Brugg", "Rheinfelden", "Zofingen", "Lenzburg", "Wohlen", "Oftringen"],
-  "Thurgau": ["Frauenfeld", "Kreuzlingen", "Arbon", "Amriswil", "Weinfelden", "Romanshorn"],
-  "Tessin": ["Lugano", "Bellinzona", "Locarno", "Mendrisio", "Chiasso", "Ascona", "Biasca"],
-  "Waadt": ["Lausanne", "Montreux", "Renens", "Nyon", "Yverdon-les-Bains", "Morges", "Vevey", "Pully", "Aigle"],
-  "Wallis": ["Sion", "Brig-Glis", "Visp", "Monthey", "Martigny", "Sierre", "Naters"],
-  "Neuenburg": ["Neuenburg", "La Chaux-de-Fonds", "Le Locle", "Val-de-Travers", "Boudry"],
-  "Genf": ["Genf", "Carouge", "Lancy", "Meyrin", "Vernier", "Onex", "Thônex", "Plan-les-Ouates"],
-  "Jura": ["Delémont", "Porrentruy", "Saignelégier", "Courrendlin", "Bassecourt"],
-};
+/* ── Legal-Form Fallback aus Firmennamen ──
+ * Konservative Regex-Erkennung mit Wortgrenzen (\b), damit „AG" nicht in
+ * „AGmedia" oder „Magnesia" matched. Reihenfolge: spezifischer vor allgemeiner
+ * (GmbH & Co KG vor GmbH/KG). Wird nur als Fallback genutzt wenn Gemini nichts
+ * liefert — keine Halluzination, weil der Match literal im Firmennamen steht.
+ */
+function detectLegalFormFromName(name: string | null | undefined): string | null {
+  if (!name) return null;
+  const patterns: Array<[RegExp, string]> = [
+    /* Kombinationen (spezifisch zuerst) */
+    [/\bGmbH\s*&\s*Co\.?\s*KGaA\b/i, "GmbH & Co KGaA"],
+    [/\bGmbH\s*&\s*Co\.?\s*KG\b/i,    "GmbH & Co KG"],
+    [/\bGmbH\s*&\s*Co\.?\s*OHG\b/i,   "GmbH & Co OHG"],
+    [/\bAG\s*&\s*Co\.?\s*KG\b/i,      "AG & Co KG"],
+    /* Mehrbuchstabige eindeutige Formen */
+    [/\bGmbH\b/i,                      "GmbH"],
+    [/\bKGaA\b/,                        "KGaA"],
+    [/\bOHG\b/i,                        "OHG"],
+    [/\bGbR\b/,                         "GbR"],
+    [/\bPart\s*GmbB\b/i,                "PartG mbB"],
+    [/\bPartG\b/i,                      "PartG"],
+    [/\bFlexCo\b/i,                     "FlexCo"],
+    [/\bUG\s*\(haftungsbeschränkt\)/i, "UG"],
+    [/\bKlG\b/,                         "KlG"],
+    [/\bKmG\b/,                         "KmG"],
+    /* Punktierte Kurzformen */
+    [/\be\.\s*U\.?\b/i,                 "e.U."],
+    [/\be\.\s*V\.?\b/i,                 "e.V."],
+    /* Zweibuchstabige Kurzformen — case-sensitive damit „og" in „Yoga" nicht trifft */
+    [/\bAG\b/,                          "AG"],
+    [/\bKG\b/,                          "KG"],
+    [/\bOG\b/,                          "OG"],
+    [/\bUG\b/,                          "UG"],
+    [/\bSE\b/,                          "SE"],
+  ];
+  for (const [re, label] of patterns) {
+    if (re.test(name)) return label;
+  }
+  return null;
+}
+
+/* ── Phone & Email Cleanup Utilities ── */
+
+/** Normalisiert eine Telefonnummer ins E.164-Format für AT/DE/CH */
+function normalizePhone(phone: string, defaultCountry: string = "AT"): string {
+  let cleaned = phone.replace(/[\s\-\/().\u00a0]/g, "");
+  if (!cleaned) return phone;
+  // Bereits internationales Format
+  if (cleaned.startsWith("+")) return cleaned;
+  // Nationale Nummer → internationales Format
+  if (cleaned.startsWith("0")) {
+    const prefix = defaultCountry === "DE" ? "+49" : defaultCountry === "CH" ? "+41" : "+43";
+    cleaned = prefix + cleaned.substring(1);
+  }
+  return cleaned;
+}
+
+/** Entfernt Spam-Schutz-Strings aus Emails */
+function cleanSpamProtection(email: string): string {
+  return email
+    .replace(/NOSPAM/gi, "")
+    .replace(/REMOVETHIS/gi, "")
+    .replace(/SPAM/gi, "")
+    .replace(/\[at\]/gi, "@")
+    .replace(/\[dot\]/gi, ".")
+    .replace(/\.invalid$/i, "");
+}
 
 interface GooglePlace {
   id: string;
@@ -148,12 +198,14 @@ const DEPRIORITIZED_EMAIL_PREFIXES = [
 ];
 
 function sanitizeEmail(email: string): string {
-  return email
+  let cleaned = email
     .trim()
     .replace(/%20/g, "")
     .replace(/%40/g, "@")
-    .replace(/^['"]+|['"]+$/g, "")
-    .toLowerCase();
+    .replace(/^['"]+|['"]+$/g, "");
+  // Remove spam protection strings (officeNOSPAM@ → office@)
+  cleaned = cleanSpamProtection(cleaned);
+  return cleaned.toLowerCase();
 }
 
 function isValidEmail(email: string): boolean {
@@ -215,45 +267,76 @@ function selectBestEmail(emails: string[], companyWebsite: string): string | nul
    ══════════════════════════════════════════════════════ */
 
 export async function runEnrichmentPipeline(params: PipelineParams): Promise<void> {
-  const { jobId, userId, query, location, country, companyType = "all", city, requireCeo = false } = params;
+  const {
+    jobId,
+    userId,
+    query,
+    location,
+    country,
+    companyType = "all",
+    city,
+    requireCeo = false,
+    requireEmail = false,
+    requireWebsite = false,
+  } = params;
+  const stats = newJobStats();
 
   try {
     const startTime = Date.now();
     await updateJobStatus(jobId, "running", { started_at: new Date().toISOString() });
 
-    // Determine search locations: specific city, or Bundesland → expand to cities
-    let searchLocations: string[];
-    if (city) {
-      // User specified a specific city
-      searchLocations = [city];
-      console.log(`[Pipeline] Start: "${query}" in Stadt "${city}" (Job: ${jobId})`);
-    } else if (REGION_CITIES[location]) {
-      // Region selected → search all cities
-      searchLocations = REGION_CITIES[location];
-      console.log(`[Pipeline] Start: "${query}" in ${location} (${searchLocations.length} Städte) (Job: ${jobId})`);
-    } else {
-      // Fallback: use location as-is
-      searchLocations = [location];
-      console.log(`[Pipeline] Start: "${query} in ${location}" (Job: ${jobId})`);
-    }
+    // Multi-Branchen-Support: Komma-getrennte Query → einzelne Branchen abarbeiten
+    const branches = parseBranches(query);
 
-    // Google Places Suche über alle Städte
-    const allPlaces: GooglePlace[] = [];
-    const seenPlaceIds = new Set<string>();
+    // Google Places Suche: Bounding Box (Region) oder Text (Stadt)
+    // Pro Branche separate Suche, Places per place.id dedupliziert.
+    // Wir merken uns für jeden Place die zuerst-matchende Branche → für Lead.industry.
+    const placeIndex = new Map<string, { place: GooglePlace; branch: string }>();
 
-    for (const loc of searchLocations) {
-      console.log(`[Pipeline] Suche in: "${query} in ${loc}"`);
-      const places = await searchGooglePlaces(query, loc);
-      // Deduplicate by Google Place ID
-      for (const p of places) {
-        if (!seenPlaceIds.has(p.id)) {
-          seenPlaceIds.add(p.id);
-          allPlaces.push(p);
+    const isRegionMode = !city && getSearchBoxes(location).length > 0;
+    for (const branch of branches) {
+      let branchPlaces: GooglePlace[];
+      if (city) {
+        console.log(`[Pipeline] Branche "${branch}" in Stadt "${city}" (Job: ${jobId})`);
+        branchPlaces = await searchGooglePlaces(branch, { location: city, stats }).then((r) => r.places);
+      } else if (isRegionMode) {
+        console.log(`[Pipeline] Branche "${branch}" in Region "${location}" via Bounding Box (Job: ${jobId})`);
+        branchPlaces = await searchRegion(branch, location, stats);
+      } else {
+        console.log(`[Pipeline] Branche "${branch}" in "${location}" via Textsuche (Job: ${jobId})`);
+        branchPlaces = await searchGooglePlaces(branch, { location, stats }).then((r) => r.places);
+      }
+
+      // ── Off-Region-Filter (nur im Region-Mode, vor Pipeline-Verarbeitung) ──
+      // Wir filtern Places deren PLZ in einer anderen DACH-Region liegt.
+      // Spart Gemini-Calls für Leads die wir eh wegwerfen würden.
+      if (isRegionMode) {
+        const before = branchPlaces.length;
+        branchPlaces = branchPlaces.filter((p) => placeMatchesRegion(p.formattedAddress, country, location));
+        const dropped = before - branchPlaces.length;
+        if (dropped > 0) {
+          stats.offRegionSkipped += dropped;
+          console.log(`[Pipeline] Off-Region-Filter: ${dropped} Places gedroppt (nicht in ${location})`);
         }
+      }
+
+      for (const p of branchPlaces) {
+        if (!placeIndex.has(p.id)) placeIndex.set(p.id, { place: p, branch });
+      }
+      console.log(`[Pipeline] Branche "${branch}": ${branchPlaces.length} Places (gesamt unique: ${placeIndex.size})`);
+
+      // Bei Multi-Branche: total_count live updaten, damit UI Progress zeigt während weitere Branchen gesucht werden
+      if (branches.length > 1) {
+        await updateJobStatus(jobId, "running", { total_count: placeIndex.size });
       }
     }
 
-    console.log(`[Pipeline] ${allPlaces.length} Places gefunden (${searchLocations.length} Städte durchsucht)`);
+    const allPlaces: GooglePlace[] = [...placeIndex.values()].map((e) => e.place);
+    const branchByPlaceId = new Map<string, string>(
+      [...placeIndex.entries()].map(([id, e]) => [id, e.branch]),
+    );
+
+    console.log(`[Pipeline] ${allPlaces.length} Places gefunden (${branches.length} Branche${branches.length > 1 ? "n" : ""})`);
 
     if (allPlaces.length === 0) {
       await updateJobStatus(jobId, "completed", {
@@ -266,83 +349,157 @@ export async function runEnrichmentPipeline(params: PipelineParams): Promise<voi
 
     await updateJobStatus(jobId, "running", { total_count: allPlaces.length });
 
-    // Für jede Firma: Enrichment
+    // ── Batch-Dupe-Check: alle bekannten place_ids vorab laden statt pro Lead ──
+    // Spart N × 100-300ms Supabase-Roundtrips. Bei 200 Places: 20-60s Ersparnis.
+    const dupeCheckStart = Date.now();
+    const placeIdList = allPlaces.map((p) => p.id).filter(Boolean);
+    const { data: existingRows } = await getSupabaseAdmin()
+      .from("leads")
+      .select("google_place_id, email")
+      .in("google_place_id", placeIdList.length > 0 ? placeIdList : ["__none__"]);
+    const existingPlaceIds = new Set<string>(
+      (existingRows || []).map((r) => r.google_place_id).filter((v): v is string => !!v),
+    );
+    const existingEmails = new Set<string>(
+      (existingRows || []).map((r) => (r.email || "").toLowerCase()).filter(Boolean),
+    );
+    console.log(`[Pipeline] Batch-Dupe-Check: ${existingPlaceIds.size} bekannte Place-IDs, ${existingEmails.size} bekannte Emails (${((Date.now() - dupeCheckStart) / 1000).toFixed(1)}s)`);
+
+    // Worker Pool — Sweet Spot lt. Benchmark: 25. Mit Gemini-Skips kann höher gehen.
+    // Override via PIPELINE_CONCURRENCY. Gemini-Semaphore (GEMINI_GLOBAL_CONCURRENCY) deckelt cross-job.
+    const CONCURRENCY = parseInt(process.env.PIPELINE_CONCURRENCY || "25", 10);
     let resultsCount = 0;
     let processedCount = 0;
     const timings: number[] = [];
+    let cancelledFlag = false;
+    // Cancellation: check once every 10 companies instead of every single one
+    let lastCancelCheck = 0;
+    const CANCEL_CHECK_INTERVAL = 10;
 
-    for (let i = 0; i < allPlaces.length; i++) {
-      const place = allPlaces[i];
-      const companyName = place.displayName?.text || "Unbekannt";
-      const companyStart = Date.now();
+    const queue = [...allPlaces];
+    let queueIndex = 0;
 
-      // Cancellation Check bei jeder Firma
-      const cancelled = await isJobCancelled(jobId);
-      if (cancelled) {
-        console.log(`[Pipeline] Job ${jobId} abgebrochen bei ${i}/${allPlaces.length}`);
-        await updateJobStatus(jobId, "failed", {
-          error_message: "Vom Benutzer abgebrochen",
-          results_count: resultsCount,
-          completed_at: new Date().toISOString(),
-        });
-        return;
-      }
+    const workers = Array.from({ length: Math.min(CONCURRENCY, allPlaces.length) }, async (_, workerId) => {
+      while (queue.length > 0 && !cancelledFlag) {
+        const place = queue.shift()!;
+        const idx = queueIndex++;
+        const companyName = place.displayName?.text || "Unbekannt";
+        const companyStart = Date.now();
 
-      try {
-        console.log(`[Pipeline] [${i + 1}/${allPlaces.length}] ${companyName}`);
-        const lead = await enrichAndBuildLead(place, query, location, country, userId, jobId);
-
-        if (!lead) {
-          console.log(`[Pipeline]   → Skip (keine valide Email)`);
-        } else if (companyType !== "all" && lead.legal_form && !matchesCompanyType(lead.legal_form, companyType)) {
-          console.log(`[Pipeline]   → Skip (Rechtsform ${lead.legal_form} ≠ ${companyType})`);
-        } else if (requireCeo && !lead.ceo_name) {
-          console.log(`[Pipeline]   → Skip (kein Geschäftsführer gefunden, requireCeo aktiv)`);
-        } else {
-          // Duplikatsprüfung: google_place_id ODER email
-          const dupeChecks: string[] = [];
-          if (lead.google_place_id) dupeChecks.push(`google_place_id.eq.${lead.google_place_id}`);
-          if (lead.email) dupeChecks.push(`email.eq.${lead.email}`);
-
-          let isDuplicate = false;
-          if (dupeChecks.length > 0) {
-            const { data: existing } = await getSupabaseAdmin()
-              .from("leads")
-              .select("id")
-              .or(dupeChecks.join(","))
-              .limit(1);
-            isDuplicate = !!existing && existing.length > 0;
-          }
-
-          if (isDuplicate) {
-            console.log(`[Pipeline]   → Skip (Duplikat: place_id oder email existiert bereits)`);
-          } else {
-            const { error } = await getSupabaseAdmin().from("leads").insert(lead);
-            if (error) {
-              console.error(`[Pipeline]   → Insert-Fehler:`, error.message);
-            } else {
-              resultsCount++;
-            }
+        // Cancellation Check (shared flag, nur alle N Firmen DB-Query)
+        if (idx - lastCancelCheck >= CANCEL_CHECK_INTERVAL) {
+          lastCancelCheck = idx;
+          cancelledFlag = await isJobCancelled(jobId);
+          if (cancelledFlag) {
+            console.log(`[Pipeline] Job ${jobId} abgebrochen bei ${processedCount}/${allPlaces.length}`);
+            await updateJobStatus(jobId, "failed", {
+              error_message: "Vom Benutzer abgebrochen",
+              results_count: resultsCount,
+              completed_at: new Date().toISOString(),
+            });
+            return;
           }
         }
-      } catch (err) {
-        console.error(`[Pipeline]   → Fehler:`, err);
+
+        try {
+          console.log(`[Pipeline] [W${workerId}] [${idx + 1}/${allPlaces.length}] ${companyName}`);
+
+          // 1. Schneller Pre-Dupe-Check (kein Pipeline-Aufwand wenn schon im CRM)
+          if (place.id && existingPlaceIds.has(place.id)) {
+            console.log(`[Pipeline] [W${workerId}]   → Skip (Duplikat - place_id schon im CRM)`);
+            stats.duplicatesSkipped++;
+            processedCount++;
+            timings.push(Date.now() - companyStart);
+            await updateETA(jobId, resultsCount, processedCount, allPlaces.length, timings, CONCURRENCY);
+            continue;
+          }
+
+          // 2. Pre-Check: ist überhaupt Lead-Potenzial da?
+          // Bei keiner Website UND keiner Phone → keine Möglichkeit für Email → Drop ohne API-Call
+          const hasWebsite = !!place.websiteUri;
+          const hasPhone = !!(place.internationalPhoneNumber || place.nationalPhoneNumber);
+          if (!hasWebsite && !hasPhone) {
+            console.log(`[Pipeline] [W${workerId}]   → Skip (kein Website + keine Phone)`);
+            stats.geminiSkipped++;
+            stats.noEmailSkipped++;
+            processedCount++;
+            timings.push(Date.now() - companyStart);
+            await updateETA(jobId, resultsCount, processedCount, allPlaces.length, timings, CONCURRENCY);
+            continue;
+          }
+
+          // 3. Hauptarbeit: enrich (Gemini-Calls werden in stats getrackt)
+          const matchedBranch = branchByPlaceId.get(place.id) || branches[0] || query;
+          const lead = await withTimeout(
+            enrichAndBuildLead(place, matchedBranch, location, country, userId, jobId, stats, requireCeo),
+            COMPANY_TIMEOUT_MS,
+            `Timeout bei "${companyName}" nach ${COMPANY_TIMEOUT_MS / 1000}s`,
+          );
+
+          if (!lead) {
+            console.log(`[Pipeline] [W${workerId}]   → Skip (keine valide Email)`);
+            stats.noEmailSkipped++;
+          } else if (companyType !== "all" && lead.legal_form && !matchesCompanyType(lead.legal_form, companyType)) {
+            console.log(`[Pipeline] [W${workerId}]   → Skip (Rechtsform ${lead.legal_form} ≠ ${companyType})`);
+          } else if (requireCeo && !lead.ceo_name) {
+            console.log(`[Pipeline] [W${workerId}]   → Skip (kein Geschäftsführer gefunden, requireCeo aktiv)`);
+            stats.noCeoSkipped++;
+          } else if (requireEmail && !lead.email) {
+            console.log(`[Pipeline] [W${workerId}]   → Skip (keine E-Mail gefunden, requireEmail aktiv)`);
+            stats.noEmailSkipped++;
+          } else if (requireWebsite && !lead.website) {
+            console.log(`[Pipeline] [W${workerId}]   → Skip (keine Website gefunden, requireWebsite aktiv)`);
+          } else {
+            // 4. Email-Dupe-Check (gegen lokales Set, kein DB-Roundtrip)
+            const emailLower = (lead.email || "").toLowerCase();
+            if (emailLower && existingEmails.has(emailLower)) {
+              console.log(`[Pipeline] [W${workerId}]   → Skip (Duplikat - email schon im CRM)`);
+              stats.duplicatesSkipped++;
+            } else {
+              // Insert + lokale Sets updaten (gegen Race-Condition zwischen Workers)
+              const { error } = await getSupabaseAdmin().from("leads").insert(lead);
+              if (error) {
+                // Wenn unique-constraint greift, ist's auch ein Dupe → ok
+                if (error.code === "23505") {
+                  console.log(`[Pipeline] [W${workerId}]   → Skip (Race-Duplikat von DB abgefangen)`);
+                  stats.duplicatesSkipped++;
+                } else {
+                  console.error(`[Pipeline] [W${workerId}]   → Insert-Fehler:`, error.message);
+                }
+              } else {
+                resultsCount++;
+                stats.inserts++;
+                if (place.id) existingPlaceIds.add(place.id);
+                if (emailLower) existingEmails.add(emailLower);
+              }
+            }
+          }
+        } catch (err) {
+          console.error(`[Pipeline] [W${workerId}]   → Fehler:`, err);
+        }
+
+        processedCount++;
+        timings.push(Date.now() - companyStart);
+        await updateETA(jobId, resultsCount, processedCount, allPlaces.length, timings, CONCURRENCY);
       }
+    });
 
-      processedCount++;
-      timings.push(Date.now() - companyStart);
-      await updateETA(jobId, resultsCount, processedCount, allPlaces.length, timings);
-
-      // Kleine Pause zwischen Firmen um API Rate-Limits zu vermeiden
-      if (i < allPlaces.length - 1) await sleep(300);
-    }
+    await Promise.all(workers);
+    if (cancelledFlag) return;
 
     await updateJobStatus(jobId, "completed", {
       results_count: resultsCount,
       completed_at: new Date().toISOString(),
     });
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`[Pipeline] Job ${jobId} fertig: ${resultsCount} Leads in ${elapsed}s`);
+    const elapsedSec = (Date.now() - startTime) / 1000;
+    const cost = estimateCostCents(stats);
+    const leadsPerEuro = cost.total > 0 ? (resultsCount * 100 / cost.total).toFixed(1) : "∞";
+    console.log(`[Pipeline] ══════ Job ${jobId} fertig in ${elapsedSec.toFixed(1)}s ══════`);
+    console.log(`[Pipeline] Ergebnis:  ${resultsCount} Leads inserted (${allPlaces.length} Places gescannt)`);
+    console.log(`[Pipeline] Google:    ${stats.googlePlacesPages} Page-Calls (${stats.boxSplits} adaptive Splits)`);
+    console.log(`[Pipeline] Gemini:    Stage1=${stats.geminiStage1}, Stage2=${stats.geminiStage2} (${stats.geminiSkipped} pre-skipped)`);
+    console.log(`[Pipeline] Pipeline:  ${stats.scrapes} scrapes, ${stats.duplicatesSkipped} dupes, ${stats.noEmailSkipped} no-email, ${stats.noCeoSkipped} no-ceo, ${stats.offRegionSkipped} off-region`);
+    console.log(`[Pipeline] Kosten:    Google ~${(cost.google / 100).toFixed(2)}€, Gemini ~${(cost.gemini / 100).toFixed(2)}€, TOTAL ~${(cost.total / 100).toFixed(2)}€ (${leadsPerEuro} Leads/€)`);
   } catch (err) {
     console.error(`[Pipeline] Job ${jobId} fehlgeschlagen:`, err);
     const msg = err instanceof Error ? err.message : "Unbekannter Fehler";
@@ -363,11 +520,17 @@ async function updateETA(
   processedCount: number,
   totalCount: number,
   timings: number[],
+  concurrency: number,
 ): Promise<void> {
   const remaining = totalCount - processedCount;
-  const recentTimings = timings.slice(-10);
-  const avgMs = recentTimings.reduce((a, b) => a + b, 0) / recentTimings.length;
-  const estimatedRemainingMs = remaining * avgMs;
+  const recentTimings = timings.slice(-25);
+  const avgMs = recentTimings.length > 0
+    ? recentTimings.reduce((a, b) => a + b, 0) / recentTimings.length
+    : 1500;
+  // Wichtig: Places werden parallel verarbeitet (Worker-Pool). Effektive Rate
+  // = avgMs / Worker-Anzahl, sonst überschätzen wir ETA um Faktor 25.
+  const effectiveMsPerPlace = avgMs / concurrency;
+  const estimatedRemainingMs = remaining * effectiveMsPerPlace;
   const estimatedEnd = remaining > 0
     ? new Date(Date.now() + estimatedRemainingMs).toISOString()
     : null;
@@ -382,21 +545,49 @@ async function updateETA(
    Google Places API (mit Pagination)
    ══════════════════════════════════════════════════════ */
 
-async function searchGooglePlaces(query: string, location: string): Promise<GooglePlace[]> {
+/** Google Places Text-Search Limits (API-seitig hart):
+ * - 20 Treffer pro Page, max 3 Pages = 60 pro Query.
+ * - Wenn nach Page 3 noch ein nextPageToken existiert, gibt es MEHR als 60 in der Box.
+ *   In dem Fall splittet searchBoxAdaptive die Box in 4 Quadranten (rekursiv).
+ *
+ * Quellen: https://issuetracker.google.com/issues/35826799,
+ *          https://blog.apify.com/google-places-api-limits/
+ */
+const ADAPTIVE_MAX_DEPTH = 4;     // 1+4+16+64+256 = max 341 Boxes (Min-Span stoppt aber früher)
+const ADAPTIVE_MIN_LAT_SPAN = 0.05; // ≈ 5.5 km — feiner geht's Stadtteil-Ebene
+const ADAPTIVE_MIN_LNG_SPAN = 0.05;
+
+/** Google Places Suche: entweder per Bounding Box (Region) oder per Text (Stadt).
+ * Liefert auch zurück, ob nach Page 3 noch ein nextPageToken existiert (= mehr als 60 Treffer in dieser Box).
+ */
+export async function searchGooglePlaces(
+  query: string,
+  options: { location?: string; boundingBox?: BoundingBox; stats?: JobStats },
+): Promise<{ places: GooglePlace[]; hasMore: boolean }> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY;
   if (!apiKey) throw new Error("GOOGLE_PLACES_API_KEY ist nicht gesetzt");
 
   const allPlaces: GooglePlace[] = [];
   let pageToken: string | undefined;
+  let hasMoreAfterLastPage = false;
 
-  for (let page = 0; page < 5; page++) {
+  for (let page = 0; page < 3; page++) {
     const body: Record<string, unknown> = {
-      textQuery: `${query} in ${location}`,
+      textQuery: options.boundingBox ? query : `${query} in ${options.location}`,
       languageCode: "de",
       maxResultCount: 20,
     };
     if (pageToken) body.pageToken = pageToken;
+    if (options.boundingBox) {
+      body.locationRestriction = {
+        rectangle: {
+          low: { latitude: options.boundingBox.south, longitude: options.boundingBox.west },
+          high: { latitude: options.boundingBox.north, longitude: options.boundingBox.east },
+        },
+      };
+    }
 
+    if (options.stats) options.stats.googlePlacesPages++;
     const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
       method: "POST",
       headers: {
@@ -419,131 +610,276 @@ async function searchGooglePlaces(query: string, location: string): Promise<Goog
 
     pageToken = data.nextPageToken;
     if (!pageToken) break;
+    // Wenn das die letzte mögliche Page war und es noch ein Token gibt → Box ist überfüllt
+    if (page === 2) hasMoreAfterLastPage = true;
     await sleep(300);
   }
 
+  return { places: allPlaces, hasMore: hasMoreAfterLastPage };
+}
+
+/** Adaptive Box-Suche: splittet rekursiv in Quadranten, wenn eine Box >60 Treffer hat.
+ * Verhindert Datenverlust in dichten Städten (z.B. "Anwalt" in Berlin/Wien).
+ */
+async function searchBoxAdaptive(
+  query: string,
+  box: BoundingBox,
+  depth: number,
+  seenIds: Set<string>,
+  stats?: JobStats,
+): Promise<GooglePlace[]> {
+  const { places, hasMore } = await searchGooglePlaces(query, { boundingBox: box, stats });
+
+  const fresh: GooglePlace[] = [];
+  for (const p of places) {
+    if (!seenIds.has(p.id)) {
+      seenIds.add(p.id);
+      fresh.push(p);
+    }
+  }
+
+  // Box voll UND noch Splitting-Spielraum → vierteln und rekursiv suchen
+  const canSplit =
+    hasMore &&
+    depth < ADAPTIVE_MAX_DEPTH &&
+    (box.north - box.south) > ADAPTIVE_MIN_LAT_SPAN &&
+    (box.east - box.west) > ADAPTIVE_MIN_LNG_SPAN;
+
+  if (!canSplit) return fresh;
+
+  console.log(`[Pipeline] Box voll (depth=${depth}, span=${(box.north - box.south).toFixed(3)}°×${(box.east - box.west).toFixed(3)}°), splitte in 4 Quadranten`);
+  if (stats) stats.boxSplits++;
+  const quads = splitInto4(box);
+  const subResults = await Promise.all(
+    quads.map((q) => searchBoxAdaptive(query, q, depth + 1, seenIds, stats)),
+  );
+  return [...fresh, ...subResults.flat()];
+}
+
+/** Teilt eine Box in 4 gleich große Quadranten (NE, NW, SE, SW). */
+function splitInto4(box: BoundingBox): BoundingBox[] {
+  const midLat = (box.south + box.north) / 2;
+  const midLng = (box.west + box.east) / 2;
+  return [
+    { south: midLat, north: box.north, west: box.west, east: midLng },
+    { south: midLat, north: box.north, west: midLng, east: box.east },
+    { south: box.south, north: midLat, west: box.west, east: midLng },
+    { south: box.south, north: midLat, west: midLng, east: box.east },
+  ];
+}
+
+/** Sucht in einer Region über Bounding-Box-Grid mit adaptivem Sub-Splitting */
+export async function searchRegion(query: string, regionName: string, stats?: JobStats): Promise<GooglePlace[]> {
+  const boxes = getSearchBoxes(regionName);
+  if (boxes.length === 0) {
+    // Kein Bounding Box definiert → Fallback auf Textsuche
+    console.log(`[Pipeline] Keine Bounding Box für "${regionName}", verwende Textsuche`);
+    const { places } = await searchGooglePlaces(query, { location: regionName, stats });
+    return places;
+  }
+
+  console.log(`[Pipeline] Region "${regionName}": ${boxes.length} Suchbereiche (adaptive Splitting aktiv)`);
+  const seenIds = new Set<string>();
+
+  // Alle Boxen parallel — adaptives Splitting passiert pro Box bei Bedarf
+  const results = await Promise.allSettled(
+    boxes.map((box) => searchBoxAdaptive(query, box, 0, seenIds, stats)),
+  );
+
+  const allPlaces: GooglePlace[] = [];
+  for (const result of results) {
+    if (result.status !== "fulfilled") continue;
+    allPlaces.push(...result.value);
+  }
+
   return allPlaces;
+}
+
+/** Zerlegt eine Komma-Liste in einzelne Branchen-Queries (trim, min 2 Zeichen, leer = Fallback). */
+function parseBranches(rawQuery: string): string[] {
+  const parts = (rawQuery || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 2);
+  return parts.length > 0 ? parts : [rawQuery.trim()];
 }
 
 /* ══════════════════════════════════════════════════════
    Website Scraping
    ══════════════════════════════════════════════════════ */
 
-async function fetchWebsiteData(baseUrl: string): Promise<WebsiteData> {
-  const cleanBase = baseUrl.replace(/\/$/, "");
+/** Relevante Pfad-Keywords für Sitemap-URL-Filterung */
+const RELEVANT_PATH_KEYWORDS = [
+  "impressum", "imprint", "team", "kontakt", "contact",
+  "about", "ueber-uns", "unternehmen", "management",
+  "geschaeftsfuehrung", "partner", "anwalt", "anwaelte",
+  "rechtsanwalt", "kanzlei",
+];
 
-  const urls = [
-    { url: cleanBase, type: "homepage" },
-    { url: cleanBase + "/impressum", type: "impressum" },
-    { url: cleanBase + "/imprint", type: "impressum" },
-    { url: cleanBase + "/ueber-uns", type: "about" },
-    { url: cleanBase + "/about", type: "about" },
-    { url: cleanBase + "/about-us", type: "about" },
-    { url: cleanBase + "/unternehmen", type: "about" },
-    { url: cleanBase + "/team", type: "team" },
-    { url: cleanBase + "/unser-team", type: "team" },
-    { url: cleanBase + "/partner", type: "team" },
-    { url: cleanBase + "/geschaeftsfuehrung", type: "team" },
-    { url: cleanBase + "/management", type: "team" },
-    { url: cleanBase + "/kontakt", type: "kontakt" },
-    { url: cleanBase + "/contact", type: "kontakt" },
+/** Versucht /sitemap.xml zu laden und relevante URLs zu extrahieren */
+async function fetchSitemapUrls(baseUrl: string): Promise<string[]> {
+  try {
+    const response = await fetch(baseUrl + "/sitemap.xml", {
+      signal: AbortSignal.timeout(5000),
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; LeadBot/1.0)" },
+      redirect: "follow",
+    });
+    if (!response.ok) return [];
+    const xml = await response.text();
+    // Extract <loc> URLs from sitemap
+    const urls = [...xml.matchAll(/<loc>\s*(https?:\/\/[^<\s]+)\s*<\/loc>/gi)].map((m) => m[1]);
+    // Filter to relevant pages
+    const relevant = urls.filter((url) => {
+      const path = new URL(url).pathname.toLowerCase();
+      return RELEVANT_PATH_KEYWORDS.some((kw) => path.includes(kw));
+    });
+    return relevant.slice(0, 3); // Max 3 additional pages
+  } catch {
+    return [];
+  }
+}
+
+/** Klassifiziert eine URL nach Seitentyp */
+function classifyUrl(url: string): string {
+  const path = new URL(url).pathname.toLowerCase();
+  if (path === "/" || path === "") return "homepage";
+  if (path.includes("impressum") || path.includes("imprint")) return "impressum";
+  if (path.includes("kontakt") || path.includes("contact")) return "kontakt";
+  if (path.includes("team") || path.includes("management") || path.includes("geschaeftsfuehrung") || path.includes("partner")) return "team";
+  if (path.includes("about") || path.includes("ueber-uns") || path.includes("unternehmen")) return "about";
+  return "other";
+}
+
+/** Extrahiert Daten aus einer einzelnen HTML-Seite */
+function extractPageData(html: string, pageType: string) {
+  const text = html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
+    .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .substring(0, 2000);
+
+  const emails = html.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
+  const phones = (html.match(/(?:\+[1-9]\d{0,2}|0)[\s\d\-\/()]{7,20}/g) || [])
+    .map((p) => p.replace(/[\s\-\/()]/g, ""));
+
+  const socials: Record<string, string | null> = {};
+  const socialPatterns: [string, RegExp][] = [
+    ["linkedin", /https?:\/\/([a-z]{2,3}\.)?linkedin\.com\/(?:company|in)\/[^\s"'<>]+/i],
+    ["facebook", /https?:\/\/([a-z]{2,3}\.)?facebook\.com\/(?!sharer)[^\s"'<>]+/i],
+    ["instagram", /https?:\/\/([a-z]{2,3}\.)?instagram\.com\/(?!p\/)[^\s"'<>]+/i],
+    ["xing", /https?:\/\/([a-z]{2,3}\.)?xing\.com\/(?:profile|companies)\/[^\s"'<>]+/i],
+    ["twitter", /https?:\/\/([a-z]{2,3}\.)?(twitter\.com|x\.com)\/(?!intent|share)[^\s"'<>]+/i],
+    ["youtube", /https?:\/\/([a-z]{2,3}\.)?youtube\.com\/(channel|c|user|@)[^\s"'<>]+/i],
+    ["tiktok", /https?:\/\/([a-z]{2,3}\.)?tiktok\.com\/@[^\s"'<>]+/i],
   ];
+  for (const [name, pattern] of socialPatterns) {
+    const m = html.match(pattern);
+    socials[name] = m ? m[0].split('"')[0].split("'")[0].split("?")[0] : null;
+  }
 
-  const seenTypes: Record<string, number> = {};
-  const filteredUrls = urls.filter((u) => {
-    seenTypes[u.type] = (seenTypes[u.type] || 0) + 1;
-    return u.type === "homepage" || seenTypes[u.type] <= 2;
-  });
+  return { text: `\n\n=== ${pageType.toUpperCase()} ===\n${text}\n`, emails, phones, socials };
+}
 
+/** Fetcht eine einzelne Seite mit Timeout */
+async function fetchPage(url: string): Promise<{ url: string; html: string } | null> {
+  try {
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(10000),
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; LeadBot/1.0)" },
+      redirect: "follow",
+    });
+    if (!response.ok) return null;
+    const ct = response.headers.get("content-type") || "";
+    if (!ct.includes("text/html")) return null;
+    return { url, html: await response.text() };
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchWebsiteData(baseUrl: string): Promise<WebsiteData> {
+  const cleanBase = baseUrl.replace(/\/$/, "");
+  const scrapingStart = Date.now();
+
+  // Step 1+2: Homepage und Sitemap parallel laden
+  const [homepageResult, sitemapUrls] = await Promise.all([
+    fetchPage(cleanBase),
+    fetchSitemapUrls(cleanBase),
+  ]);
+
+  // Step 3: Determine additional pages to fetch
+  let additionalUrls: { url: string; type: string }[];
+  if (sitemapUrls.length > 0) {
+    // Sitemap found → use those URLs
+    additionalUrls = sitemapUrls.map((url) => ({ url, type: classifyUrl(url) }));
+    console.log(`[Scraping] Sitemap gefunden: ${sitemapUrls.length} relevante URLs`);
+  } else {
+    // No sitemap → fallback to /impressum + /kontakt only
+    additionalUrls = [
+      { url: cleanBase + "/impressum", type: "impressum" },
+      { url: cleanBase + "/kontakt", type: "kontakt" },
+    ];
+  }
+
+  // Step 4: Fetch additional pages in parallel
+  const additionalResults = await Promise.allSettled(
+    additionalUrls.map((entry) => fetchPage(entry.url)),
+  );
+
+  // Collect all results
   let combinedText = "";
   const pagesLoaded: string[] = [];
   const emailsFound: string[] = [];
   const phonesFound: string[] = [];
-  let socialLinkedin: string | null = null;
-  let socialFacebook: string | null = null;
-  let socialInstagram: string | null = null;
-  let socialXing: string | null = null;
-  let socialTwitter: string | null = null;
-  let socialYoutube: string | null = null;
-  let socialTiktok: string | null = null;
+  const allSocials: Record<string, string | null> = {};
 
-  for (const entry of filteredUrls) {
-    try {
-      const response = await fetch(entry.url, {
-        signal: AbortSignal.timeout(15000),
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; LeadBot/1.0)" },
-        redirect: "follow",
-      });
-
-      if (!response.ok) continue;
-      const ct = response.headers.get("content-type") || "";
-      if (!ct.includes("text/html")) continue;
-
-      const html = await response.text();
-
-      const text = html
-        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-        .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
-        .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/&nbsp;/g, " ")
-        .replace(/\s+/g, " ")
-        .trim()
-        .substring(0, 2000);
-
-      combinedText += `\n\n=== ${entry.type.toUpperCase()} ===\n${text}\n`;
-      pagesLoaded.push(entry.type);
-
-      // Emails
-      const emails = html.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
-      emailsFound.push(...emails);
-
-      // Phones
-      const phones = html.match(/(?:\+[1-9]\d{0,2}|0)[\s\d\-\/()]{7,20}/g) || [];
-      phonesFound.push(...phones.map((p) => p.replace(/[\s\-\/()]/g, "")));
-
-      // Social Links
-      if (!socialLinkedin) {
-        const m = html.match(/https?:\/\/([a-z]{2,3}\.)?linkedin\.com\/(?:company|in)\/[^\s"'<>]+/i);
-        if (m) socialLinkedin = m[0];
-      }
-      if (!socialFacebook) {
-        const m = html.match(/https?:\/\/([a-z]{2,3}\.)?facebook\.com\/(?!sharer)[^\s"'<>]+/i);
-        if (m) socialFacebook = m[0].split('"')[0].split("'")[0].split("?")[0];
-      }
-      if (!socialInstagram) {
-        const m = html.match(/https?:\/\/([a-z]{2,3}\.)?instagram\.com\/(?!p\/)[^\s"'<>]+/i);
-        if (m) socialInstagram = m[0].split('"')[0].split("'")[0].split("?")[0];
-      }
-      if (!socialXing) {
-        const m = html.match(/https?:\/\/([a-z]{2,3}\.)?xing\.com\/(?:profile|companies)\/[^\s"'<>]+/i);
-        if (m) socialXing = m[0].split('"')[0].split("'")[0].split("?")[0];
-      }
-      if (!socialTwitter) {
-        const m = html.match(/https?:\/\/([a-z]{2,3}\.)?(twitter\.com|x\.com)\/(?!intent|share)[^\s"'<>]+/i);
-        if (m) socialTwitter = m[0].split('"')[0].split("'")[0].split("?")[0];
-      }
-      if (!socialYoutube) {
-        const m = html.match(/https?:\/\/([a-z]{2,3}\.)?youtube\.com\/(channel|c|user|@)[^\s"'<>]+/i);
-        if (m) socialYoutube = m[0].split('"')[0].split("'")[0].split("?")[0];
-      }
-      if (!socialTiktok) {
-        const m = html.match(/https?:\/\/([a-z]{2,3}\.)?tiktok\.com\/@[^\s"'<>]+/i);
-        if (m) socialTiktok = m[0].split('"')[0].split("'")[0].split("?")[0];
-      }
-    } catch {
-      continue;
+  // Process homepage
+  if (homepageResult) {
+    const data = extractPageData(homepageResult.html, "homepage");
+    combinedText += data.text;
+    pagesLoaded.push("homepage");
+    emailsFound.push(...data.emails);
+    phonesFound.push(...data.phones);
+    for (const [k, v] of Object.entries(data.socials)) {
+      if (v && !allSocials[k]) allSocials[k] = v;
     }
   }
+
+  // Process additional pages
+  for (let i = 0; i < additionalResults.length; i++) {
+    const result = additionalResults[i];
+    if (result.status !== "fulfilled" || !result.value) continue;
+    const pageType = additionalUrls[i].type;
+    const data = extractPageData(result.value.html, pageType);
+    combinedText += data.text;
+    pagesLoaded.push(pageType);
+    emailsFound.push(...data.emails);
+    phonesFound.push(...data.phones);
+    for (const [k, v] of Object.entries(data.socials)) {
+      if (v && !allSocials[k]) allSocials[k] = v;
+    }
+  }
+
+  const elapsed = ((Date.now() - scrapingStart) / 1000).toFixed(1);
+  console.log(`[Scraping] ${pagesLoaded.length} Seiten in ${elapsed}s (${pagesLoaded.join(", ")})`);
 
   return {
     emails: [...new Set(emailsFound)],
     phones: [...new Set(phonesFound)],
     websiteContent: combinedText.substring(0, 8000),
     pagesLoaded,
-    socialLinkedin, socialFacebook, socialInstagram, socialXing,
-    socialTwitter, socialYoutube, socialTiktok,
+    socialLinkedin: allSocials["linkedin"] || null,
+    socialFacebook: allSocials["facebook"] || null,
+    socialInstagram: allSocials["instagram"] || null,
+    socialXing: allSocials["xing"] || null,
+    socialTwitter: allSocials["twitter"] || null,
+    socialYoutube: allSocials["youtube"] || null,
+    socialTiktok: allSocials["tiktok"] || null,
   };
 }
 
@@ -558,13 +894,18 @@ async function enrichAndBuildLead(
   country: string,
   userId: string,
   jobId: string,
+  stats: JobStats,
+  requireCeo: boolean,
 ): Promise<LeadInsert | null> {
   const companyName = place.displayName?.text || "";
   const website = (place.websiteUri || "").replace(/\/$/, "");
 
   // Website scrapen (CEO-Suche macht jetzt Gemini via Google Search Grounding)
   const websiteData = website
-    ? await fetchWebsiteData(website).catch((err) => {
+    ? await fetchWebsiteData(website).then((r) => {
+        stats.scrapes++;
+        return r;
+      }).catch((err) => {
         console.warn(`[Pipeline] Website-Scraping fehlgeschlagen für ${website}:`, err instanceof Error ? err.message : err);
         return null;
       })
@@ -573,8 +914,15 @@ async function enrichAndBuildLead(
   // Valide Emails aus Scraping
   const validEmails = (websiteData?.emails || []).map(sanitizeEmail).filter(isValidEmail);
 
-  // Gemini AI Extraktion mit Google Search Grounding
-  // Gemini sucht selbst bei Google nach dem Geschäftsführer
+  // Pre-Check 2: skip Gemini wenn Website nicht erreichbar UND keine Email gefunden UND nicht requireCeo
+  // Gemini würde dann sowieso nichts finden können → drop ohne API-Call sparen
+  const noViableSource = !websiteData && validEmails.length === 0;
+  if (noViableSource && !requireCeo) {
+    stats.geminiSkipped++;
+    return null;
+  }
+
+  // Gemini AI Extraktion. useGrounding nur wenn requireCeo=true (sonst keine teure Google-Search-Stage 2).
   const geminiInput: GeminiInput = {
     companyName,
     website,
@@ -582,17 +930,36 @@ async function enrichAndBuildLead(
     phone: place.internationalPhoneNumber || place.nationalPhoneNumber || null,
     pagesLoaded: websiteData?.pagesLoaded || [],
     websiteContent: websiteData?.websiteContent || "",
-    ceoSnippets: "",
     emails: validEmails,
     phones: websiteData?.phones || [],
   };
-  const aiResult = await extractWithGemini(geminiInput);
+  // Adapter: ExtractionStats schreibt in unsere JobStats-Felder
+  const geminiStatsAdapter: ExtractionStats = {
+    get stage1Calls() { return stats.geminiStage1; },
+    set stage1Calls(v: number) { stats.geminiStage1 = v; },
+    get stage2Calls() { return stats.geminiStage2; },
+    set stage2Calls(v: number) { stats.geminiStage2 = v; },
+  };
+  let aiResult = await extractWithGemini(geminiInput, {
+    useGrounding: requireCeo,
+    stats: geminiStatsAdapter,
+  });
+
+  // Anti-Gambling: Gemini-Ergebnisse verifizieren bevor wir sie verwenden
+  if (aiResult) {
+    // CEO-Verifikation: muss in Quelle stehen (Website-Content) oder via Grounding gefunden
+    aiResult = verifyCeoOrNull(aiResult, websiteData?.websiteContent || "");
+  }
 
   // Email: Gemini's Vorschlag prüfen, dann Fallback auf eigene Logik
   let bestEmail: string | null = null;
   if (aiResult?.email) {
     const aiEmail = sanitizeEmail(aiResult.email);
-    if (isValidEmail(aiEmail)) bestEmail = aiEmail;
+    if (isValidEmail(aiEmail)) {
+      // Anti-Gambling: Email muss in scraped emails ODER website content vorkommen
+      const verified = verifyEmailOrNull(aiEmail, websiteData?.emails || [], websiteData?.websiteContent || "");
+      if (verified) bestEmail = verified;
+    }
   }
   if (!bestEmail) {
     bestEmail = selectBestEmail(websiteData?.emails || [], website);
@@ -601,12 +968,13 @@ async function enrichAndBuildLead(
   // Keine valide Email → skip
   if (!bestEmail) return null;
 
-  // Phone: Gemini's Vorschlag oder Google Places
-  const bestPhone =
+  // Phone: Gemini's Vorschlag oder Google Places, normalisiert
+  const rawPhone =
     aiResult?.phone ||
     place.internationalPhoneNumber ||
     place.nationalPhoneNumber ||
     (websiteData?.phones?.[0] || null);
+  const bestPhone = rawPhone ? normalizePhone(rawPhone, country) : null;
 
   // CEO Name zusammenbauen
   const ceoName = aiResult ? buildCeoName(aiResult) : null;
@@ -616,7 +984,8 @@ async function enrichAndBuildLead(
 
   const postalCode = aiResult?.postal_code || fallbackAddress.postalCode || null;
   const leadCountry = aiResult?.country || fallbackAddress.country || country;
-  const state = postalCodeToBundesland(postalCode);
+  // Hinweis: state-Spalte ist in der DB (noch) nicht angelegt. Migration 006 anwenden
+  // damit Bundesland/Kanton-Filter im UI funktioniert. Bis dahin: weglassen.
 
   const lead: LeadInsert = {
     company: aiResult?.company_name || companyName,
@@ -629,12 +998,13 @@ async function enrichAndBuildLead(
     street: aiResult?.street || fallbackAddress.street || null,
     city: aiResult?.city || fallbackAddress.city || location,
     postal_code: postalCode,
-    state: state,
     country: leadCountry,
-    category: null,
     industry: aiResult?.industry || capitalizeFirst(query),
-    legal_form: aiResult?.legal_form || null,
-    employee_count: null,
+    /* Fallback: Wenn Gemini keine Rechtsform liefert, aus dem Firmennamen extrahieren
+     * (z.B. „Müller GmbH" → „GmbH"). Keine Halluzination, weil literal im Namen. */
+    legal_form: aiResult?.legal_form
+      || detectLegalFormFromName(aiResult?.company_name || companyName)
+      || null,
     ceo_name: ceoName,
     ceo_title: aiResult?.ceo_title || null,
     ceo_first_name: aiResult?.ceo_first_name || null,
@@ -648,7 +1018,6 @@ async function enrichAndBuildLead(
     social_linkedin: websiteData?.socialLinkedin || null,
     social_facebook: websiteData?.socialFacebook || null,
     social_instagram: websiteData?.socialInstagram || null,
-    social_xing: websiteData?.socialXing || null,
     social_twitter: websiteData?.socialTwitter || null,
     social_youtube: websiteData?.socialYoutube || null,
     social_tiktok: websiteData?.socialTiktok || null,
@@ -748,4 +1117,18 @@ function capitalizeFirst(str: string): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const COMPANY_TIMEOUT_MS = parseInt(process.env.COMPANY_TIMEOUT_MS || "60000", 10);
+
+/** Race gegen Timeout; rejects nach `ms` falls Promise hängt */
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([
+    promise.finally(() => clearTimeout(timeoutId)),
+    timeout,
+  ]);
 }

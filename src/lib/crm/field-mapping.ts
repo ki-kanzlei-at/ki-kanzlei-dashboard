@@ -172,7 +172,6 @@ export function mapLeadToWebhook(lead: Lead): Record<string, unknown> {
     social_linkedin: lead.social_linkedin,
     social_facebook: lead.social_facebook,
     social_instagram: lead.social_instagram,
-    social_xing: lead.social_xing,
     notes: lead.notes,
     created_at: lead.created_at,
   };

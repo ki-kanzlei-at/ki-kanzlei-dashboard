@@ -6,16 +6,175 @@
 
 /* ── KI Kanzlei Design Tokens ── */
 @theme {
-  --font-sans: 'Satoshi', sans-serif;
+  --font-sans: var(--font-poppins), 'Poppins', ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 body {
   font-family: var(--font-sans);
+  letter-spacing: -0.005em;
+  -webkit-font-smoothing: antialiased;
   background-image:
     radial-gradient(ellipse at 10% 0%,   oklch(0.546 0.244 263 / 0.09) 0%, transparent 50%),
     radial-gradient(ellipse at 90% 100%, oklch(0.52  0.22  290 / 0.06) 0%, transparent 50%);
   background-attachment: fixed;
 }
+
+/* ── Leads v3 Design Scope ──
+   Nur typografische Details — Font kommt jetzt global aus dem Layout. */
+.leads-v3 {
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+/* Hairline border helper */
+.leads-v3 .hairline { border-color: var(--border); }
+
+/* ── Industry tag (Branche, farbcodiert) ── */
+.ind-tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 9px 3px 7px;
+  font-size: 12px; font-weight: 500;
+  border-radius: 6px; white-space: nowrap;
+  border: 1px solid transparent; line-height: 1.4;
+}
+.ind-tag .ind-dot { width: 7px; height: 7px; border-radius: 2px; flex: 0 0 7px; }
+.ind-steuer  { background: color-mix(in oklch, oklch(0.55 0.20 250) 8%,  var(--card)); color: oklch(0.40 0.18 250); border-color: color-mix(in oklch, oklch(0.55 0.20 250) 18%, var(--card)); }
+.ind-steuer  .ind-dot { background: oklch(0.55 0.20 250); }
+.ind-recht   { background: color-mix(in oklch, oklch(0.55 0.22 295) 8%,  var(--card)); color: oklch(0.40 0.20 295); border-color: color-mix(in oklch, oklch(0.55 0.22 295) 18%, var(--card)); }
+.ind-recht   .ind-dot { background: oklch(0.55 0.22 295); }
+.ind-notar   { background: color-mix(in oklch, oklch(0.62 0.17 75)  10%, var(--card)); color: oklch(0.42 0.15 70);  border-color: color-mix(in oklch, oklch(0.62 0.17 75)  22%, var(--card)); }
+.ind-notar   .ind-dot { background: oklch(0.62 0.17 75); }
+.ind-wp      { background: color-mix(in oklch, oklch(0.55 0.16 150) 10%, var(--card)); color: oklch(0.40 0.15 150); border-color: color-mix(in oklch, oklch(0.55 0.16 150) 22%, var(--card)); }
+.ind-wp      .ind-dot { background: oklch(0.55 0.16 150); }
+.ind-multi   { background: color-mix(in oklch, oklch(0.55 0.05 250) 12%, var(--card)); color: oklch(0.35 0.04 250); border-color: color-mix(in oklch, oklch(0.55 0.05 250) 22%, var(--card)); }
+.ind-multi   .ind-dot { background: oklch(0.55 0.05 250); }
+.ind-medizin { background: color-mix(in oklch, oklch(0.60 0.16 15)  10%, var(--card)); color: oklch(0.42 0.16 15);  border-color: color-mix(in oklch, oklch(0.60 0.16 15)  22%, var(--card)); }
+.ind-medizin .ind-dot { background: oklch(0.60 0.16 15); }
+.ind-default { background: var(--muted); color: var(--muted-foreground); border-color: var(--border); }
+.ind-default .ind-dot { background: var(--muted-foreground); }
+
+/* ── Score bar ── */
+.score { display: inline-flex; align-items: center; gap: 9px; min-width: 80px; }
+.score-track { width: 44px; height: 4px; border-radius: 99px; background: var(--muted); overflow: hidden; flex: 0 0 44px; }
+.score-fill { height: 100%; border-radius: 99px; }
+.score-val { font-weight: 500; font-size: 13px; font-family: inherit; }
+.score-hi  .score-fill { background: oklch(0.62 0.18 150); } .score-hi  .score-val { color: oklch(0.40 0.15 150); }
+.score-mid .score-fill { background: var(--primary); }       .score-mid .score-val { color: var(--primary); }
+.score-low .score-fill { background: oklch(0.72 0.16 75);  } .score-low .score-val { color: oklch(0.45 0.14 75); }
+.score-vlo .score-fill { background: var(--muted-foreground); } .score-vlo .score-val { color: var(--muted-foreground); }
+
+/* ── Status badge — KI Kanzlei Brand-Palette (Tailwind sky/blue/primary/indigo) ── */
+.badge-status {
+  display: inline-flex; align-items: center;
+  border-radius: 99px; padding: 2px 9px 2px 8px;
+  font-size: 11.5px; font-weight: 500;
+  border: 1px solid transparent; white-space: nowrap; line-height: 1.5;
+}
+.badge-status .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-right: 6px; flex: 0 0 6px; }
+/* Neu — sky (sky-50/sky-700/sky-200) */
+.status-new            { background: oklch(0.977 0.013 236.62); color: oklch(0.500 0.134 242.749); border-color: oklch(0.901 0.058 230.902); }
+.status-new            .dot { background: oklch(0.685 0.169 237.323); }
+/* Kontaktiert — blue (blue-50/blue-700/blue-200) */
+.status-contacted      { background: oklch(0.970 0.014 254.604); color: oklch(0.488 0.243 264.376); border-color: oklch(0.882 0.059 254.128); }
+.status-contacted      .dot { background: oklch(0.623 0.214 259.815); }
+/* Interessiert — primary (Brand-Blau) */
+.status-interested     { background: color-mix(in oklch, var(--primary) 10%, var(--card)); color: color-mix(in oklch, var(--primary) 75%, black); border-color: color-mix(in oklch, var(--primary) 25%, var(--card)); }
+.status-interested     .dot { background: var(--primary); }
+/* Konvertiert — indigo (indigo-50/indigo-700/indigo-200) */
+.status-converted      { background: oklch(0.962 0.018 272.314); color: oklch(0.457 0.240 277.023); border-color: oklch(0.870 0.065 274.039); }
+.status-converted      .dot { background: oklch(0.511 0.262 276.966); }
+/* Kein Interesse — muted */
+.status-not_interested { background: var(--muted); color: var(--muted-foreground); border-color: var(--border); }
+.status-not_interested .dot { background: var(--muted-foreground); opacity: 0.5; }
+
+/* ── Filter trigger (dashed when empty / solid with value) ── */
+.filter-trigger {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 10px 0 11px;
+  border-radius: 6px;
+  font-size: 12.5px; font-weight: 500;
+  background: var(--card);
+  border: 1px dashed color-mix(in oklch, var(--border) 80%, var(--muted-foreground));
+  color: var(--muted-foreground);
+  transition: border-color .12s ease, color .12s ease, background .12s ease;
+  cursor: pointer;
+}
+.filter-trigger:hover { border-color: var(--muted-foreground); color: var(--foreground); }
+.filter-trigger.has-value {
+  border: 1px solid var(--border);
+  border-style: solid;
+  color: var(--foreground);
+  background: var(--card);
+}
+.filter-trigger .lbl { color: var(--muted-foreground); font-weight: 400; }
+.filter-trigger.has-value .lbl { color: var(--foreground); font-weight: 500; }
+.filter-trigger .val {
+  padding-left: 8px; margin-left: 4px;
+  border-left: 1px solid var(--border);
+  color: var(--primary); font-weight: 600;
+  max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.filter-trigger .x-btn {
+  display: inline-grid; place-items: center; width: 16px; height: 16px;
+  border-radius: 4px; color: var(--muted-foreground); margin-left: 2px;
+}
+.filter-trigger .x-btn:hover { background: var(--muted); color: var(--foreground); }
+
+/* ── Detail sheet helpers (Übersicht cards) ── */
+.detail-card {
+  background: color-mix(in oklch, var(--muted) 40%, var(--card));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.detail-card-label {
+  font-size: 11px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+  margin-bottom: 8px;
+}
+.detail-card-value {
+  font-size: 13.5px; font-weight: 500;
+  color: var(--foreground); line-height: 1.4;
+}
+.detail-card-value .sub {
+  display: block; font-size: 12px; color: var(--muted-foreground);
+  font-weight: 400; margin-top: 2px;
+}
+.detail-card-meta {
+  margin-top: 6px; font-size: 11.5px;
+  color: var(--muted-foreground);
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.detail-section-title {
+  font-size: 11.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--muted-foreground);
+  margin: 22px 0 10px;
+  display: flex; align-items: center; gap: 8px;
+}
+.detail-section-title .line { flex: 1; height: 1px; background: var(--border); }
+
+/* ── Timeline (Aktivität) ── */
+.timeline {
+  position: relative;
+  padding-left: 18px;
+  border-left: 1px solid var(--border);
+  margin-left: 4px;
+}
+.timeline-item { position: relative; padding: 0 0 16px 8px; }
+.timeline-item:last-child { padding-bottom: 0; }
+.timeline-item::before {
+  content: ""; position: absolute;
+  left: -23px; top: 5px;
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--card);
+  border: 2px solid var(--primary);
+}
+.timeline-item.is-muted::before { border-color: color-mix(in oklch, var(--border) 80%, var(--muted-foreground)); }
+.timeline-when { font-size: 11.5px; color: var(--muted-foreground); margin-bottom: 2px; }
+.timeline-what { font-size: 13px; color: var(--foreground); font-weight: 500; }
+.timeline-detail { font-size: 12.5px; color: var(--muted-foreground); margin-top: 2px; }
 
 /* Glass utilities */
 @utility glass {
@@ -107,15 +266,15 @@ body {
   --input:              oklch(0.93 0.008 247);
   --ring:               oklch(0.546 0.244 263);
 
-  /* Sidebar tokens – primary blue sidebar */
-  --sidebar:            oklch(0.546 0.244 263);
-  --sidebar-foreground: oklch(1 0 0);
-  --sidebar-primary:    oklch(1 0 0);
-  --sidebar-primary-foreground: oklch(0.546 0.244 263);
-  --sidebar-accent:     oklch(0.48 0.22 263);
-  --sidebar-accent-foreground: oklch(1 0 0);
-  --sidebar-border:     oklch(1 0 0 / 0.20);
-  --sidebar-ring:       oklch(1 0 0);
+  /* Sidebar tokens – hell (shadcn light) */
+  --sidebar:            oklch(0.985 0.004 247);
+  --sidebar-foreground: oklch(0.145 0.030 261);
+  --sidebar-primary:    oklch(0.546 0.244 263);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent:     oklch(0.96 0.012 263);
+  --sidebar-accent-foreground: oklch(0.546 0.244 263);
+  --sidebar-border:     oklch(0.91 0.009 247);
+  --sidebar-ring:       oklch(0.546 0.244 263);
 }
 
 @layer base {

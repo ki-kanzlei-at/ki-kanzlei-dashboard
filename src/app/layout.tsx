@@ -1,7 +1,15 @@
 import type { Metadata } from "next";
+import { Poppins } from "next/font/google";
 import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
+
+const poppins = Poppins({
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700"],
+  variable: "--font-poppins",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: {
@@ -25,14 +33,8 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="de">
-      <head>
-        <link
-          href="https://api.fontshare.com/v2/css?f[]=satoshi@900,700,500,300,400&display=swap"
-          rel="stylesheet"
-        />
-      </head>
-      <body className="antialiased min-h-screen">
+    <html lang="de" className={poppins.variable}>
+      <body className="antialiased min-h-screen font-sans">
         <TooltipProvider delayDuration={300}>
           {children}
           <Toaster position="bottom-right" />

@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+.auth/
+test-results/
+playwright-report/
+
+# design reference bundle (Claude Design handoff)
+.design-ref/

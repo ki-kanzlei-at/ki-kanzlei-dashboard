@@ -5,7 +5,6 @@ import Image from "next/image";
 import { toast } from "sonner";
 import { X, Trash2, Pencil, ChevronDown, CheckSquare, Sparkles, Download, Loader2, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,11 +18,11 @@ import type { CrmProvider, CrmExportResult } from "@/lib/crm/types";
 import { CRM_PROVIDERS, WEBHOOK_PROVIDER } from "@/lib/crm/providers";
 
 const STATUS_OPTIONS: { value: LeadStatus; label: string; dot: string }[] = [
-  { value: "new",            label: "Neu",            dot: "bg-primary/50" },
-  { value: "contacted",      label: "Kontaktiert",    dot: "bg-amber-500" },
-  { value: "interested",     label: "Interessiert",   dot: "bg-emerald-500" },
+  { value: "new",            label: "Neu",            dot: "bg-sky-500" },
+  { value: "contacted",      label: "Kontaktiert",    dot: "bg-blue-500" },
+  { value: "interested",     label: "Interessiert",   dot: "bg-primary" },
   { value: "not_interested", label: "Kein Interesse", dot: "bg-muted-foreground/50" },
-  { value: "converted",      label: "Konvertiert",    dot: "bg-primary" },
+  { value: "converted",      label: "Konvertiert",    dot: "bg-indigo-600" },
 ];
 
 interface CrmSettings {
@@ -142,23 +141,23 @@ export function LeadSelectionBar({
 
   return (
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-3 fade-in duration-150">
-      <div className="flex items-center gap-0.5 border border-white/10 bg-foreground/95 backdrop-blur-xl shadow-xl px-2 py-1.5 rounded-xl">
+      <div className="flex items-center gap-1 bg-foreground text-white shadow-[0_16px_40px_-16px_rgba(15,23,42,0.4),0_4px_12px_-4px_rgba(15,23,42,0.15)] pl-3.5 pr-1.5 py-1.5 rounded-[10px] text-[12.5px] [&_svg]:[stroke-width:1.75]">
         {/* Count */}
-        <div className="flex items-center gap-1.5 px-2 mr-0.5">
-          <CheckSquare className="h-3.5 w-3.5 text-primary" />
-          <span className="text-xs font-semibold text-white whitespace-nowrap">
-            {displayCount} ausgewählt
+        <div className="flex items-center gap-1.5 pr-1">
+          <CheckSquare className="h-3.5 w-3.5 text-white/70" />
+          <span className="text-[12.5px] text-white whitespace-nowrap">
+            <b className="font-semibold">{displayCount}</b> ausgewählt
           </span>
         </div>
 
         {/* Global Select Button */}
         {!isGlobalSelected && onSelectAll && totalCount && totalCount > selectedCount && (
           <>
-            <Separator orientation="vertical" className="h-4 bg-white/10" />
+            <span className="w-px h-[18px] bg-white/15 mx-1" />
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 px-2.5 text-xs text-primary hover:text-primary hover:bg-white/10 gap-1.5"
+              className="h-[30px] px-2.5 text-[12.5px] text-white/85 hover:text-white hover:bg-white/10 gap-1.5 font-normal"
               onClick={onSelectAll}
             >
               <Sparkles className="h-3 w-3" />
@@ -167,7 +166,7 @@ export function LeadSelectionBar({
           </>
         )}
 
-        <Separator orientation="vertical" className="h-4 bg-white/10" />
+        <span className="w-px h-[18px] bg-white/15 mx-1" />
 
         {/* Status ändern */}
         <DropdownMenu>
@@ -176,10 +175,10 @@ export function LeadSelectionBar({
               variant="ghost"
               size="sm"
               disabled={changingStatus}
-              className="h-7 px-2.5 text-xs text-white/80 hover:text-white hover:bg-white/10 gap-1"
+              className="h-[30px] px-2.5 text-[12.5px] text-white/85 hover:text-white hover:bg-white/10 gap-1 font-normal"
             >
-              Status
-              <ChevronDown className="h-3 w-3 opacity-60" />
+              Status ändern
+              <ChevronDown className="h-3 w-3 opacity-70" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="center" side="top" className="w-44 mb-1">
@@ -205,7 +204,7 @@ export function LeadSelectionBar({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 px-2.5 text-xs text-white/80 hover:text-white hover:bg-white/10 gap-1"
+            className="h-[30px] px-2.5 text-[12.5px] text-white/85 hover:text-white hover:bg-white/10 gap-1 font-normal"
             onClick={onEdit}
           >
             <Pencil className="h-3 w-3" />
@@ -220,7 +219,7 @@ export function LeadSelectionBar({
               variant="ghost"
               size="sm"
               disabled={!!exportingCrm}
-              className="h-7 px-2.5 text-xs text-white/80 hover:text-white hover:bg-white/10 gap-1"
+              className="h-[30px] px-2.5 text-[12.5px] text-white/85 hover:text-white hover:bg-white/10 gap-1 font-normal"
             >
               {exportingCrm ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -228,7 +227,7 @@ export function LeadSelectionBar({
                 <Download className="h-3 w-3" />
               )}
               Export
-              <ChevronDown className="h-3 w-3 opacity-60" />
+              <ChevronDown className="h-3 w-3 opacity-70" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="center" side="top" className="w-48 mb-1">
@@ -239,14 +238,14 @@ export function LeadSelectionBar({
               className="text-xs gap-2 cursor-pointer"
               onClick={() => onExport("xlsx")}
             >
-              <Download className="h-3 w-3 text-emerald-600" />
+              <Download className="h-3 w-3 text-primary" />
               Excel (.xlsx)
             </DropdownMenuItem>
             <DropdownMenuItem
               className="text-xs gap-2 cursor-pointer"
               onClick={() => onExport("csv")}
             >
-              <Download className="h-3 w-3 text-blue-600" />
+              <Download className="h-3 w-3 text-primary" />
               CSV (.csv)
             </DropdownMenuItem>
 
@@ -275,7 +274,7 @@ export function LeadSelectionBar({
                     disabled={!!exportingCrm}
                     onClick={() => handleCrmExport("webhook")}
                   >
-                    <Globe className="h-3.5 w-3.5 text-orange-500 shrink-0" />
+                    <Globe className="h-3.5 w-3.5 text-primary shrink-0" />
                     Webhook
                     {exportingCrm === "webhook" && <Loader2 className="h-3 w-3 animate-spin ml-auto" />}
                   </DropdownMenuItem>
@@ -285,25 +284,27 @@ export function LeadSelectionBar({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <Separator orientation="vertical" className="h-4 bg-white/10" />
+        <span className="w-px h-[18px] bg-white/15 mx-1" />
 
         {/* Löschen */}
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 px-2.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 gap-1"
+          className="h-[30px] px-2.5 text-[12.5px] text-red-300 hover:text-red-200 hover:bg-red-500/20 gap-1 font-normal"
           onClick={onDelete}
         >
           <Trash2 className="h-3 w-3" />
-          Löschen
         </Button>
+
+        <span className="w-px h-[18px] bg-white/15 mx-1" />
 
         {/* Schließen */}
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 px-1.5 text-white/30 hover:text-white hover:bg-white/10 ml-0.5"
+          className="h-[30px] w-[30px] p-0 text-white/70 hover:text-white hover:bg-white/10"
           onClick={onClear}
+          aria-label="Auswahl aufheben"
         >
           <X className="h-3.5 w-3.5" />
         </Button>

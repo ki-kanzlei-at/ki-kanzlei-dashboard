@@ -355,3 +355,10 @@ export const DACH_COUNTRY_CODES = new Set(["AT", "DE", "CH"]);
 export function isDACH(country: string): boolean {
   return DACH_COUNTRY_CODES.has(country);
 }
+
+/** Nur die DACH-Länder, sortiert AT → DE → CH. Aktuell die einzigen freigegebenen Länder. */
+export const DACH_COUNTRIES: { value: string; label: string; flag: string }[] = [
+  { value: "AT", label: "Österreich",   flag: "🇦🇹" },
+  { value: "DE", label: "Deutschland",  flag: "🇩🇪" },
+  { value: "CH", label: "Schweiz",      flag: "🇨🇭" },
+];

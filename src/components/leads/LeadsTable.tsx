@@ -39,11 +39,11 @@ import { LEAD_STATUS_CONFIG } from "./columns";
 export { LEAD_STATUS_CONFIG } from "./columns";
 
 const STATUS_LIST: { value: LeadStatus; label: string; dot: string }[] = [
-  { value: "new",            label: "Neu",            dot: "bg-primary/50" },
-  { value: "contacted",      label: "Kontaktiert",    dot: "bg-amber-500" },
-  { value: "interested",     label: "Interessiert",   dot: "bg-emerald-500" },
+  { value: "new",            label: "Neu",            dot: "bg-sky-500" },
+  { value: "contacted",      label: "Kontaktiert",    dot: "bg-blue-500" },
+  { value: "interested",     label: "Interessiert",   dot: "bg-primary" },
   { value: "not_interested", label: "Kein Interesse", dot: "bg-muted-foreground/50" },
-  { value: "converted",      label: "Konvertiert",    dot: "bg-primary" },
+  { value: "converted",      label: "Konvertiert",    dot: "bg-indigo-600" },
 ];
 
 interface LeadsTableProps {
@@ -120,11 +120,11 @@ export function LeadsTable({
       <Table className="table-fixed">
         <TableHeader>
           {table.getHeaderGroups().map((headerGroup) => (
-            <TableRow key={headerGroup.id} className="hover:bg-transparent border-b">
+            <TableRow key={headerGroup.id} className="hover:bg-transparent border-b bg-card">
               {headerGroup.headers.map((header) => (
                 <TableHead
                   key={header.id}
-                  className="px-3 text-xs font-medium"
+                  className="h-[42px] px-3.5 text-[11.5px] font-medium text-muted-foreground tracking-wide whitespace-nowrap"
                   style={{ width: header.getSize() }}
                 >
                   {header.isPlaceholder
@@ -144,9 +144,9 @@ export function LeadsTable({
                 <ContextMenuTrigger asChild>
                   <TableRow
                     className={cn(
-                      "h-12 cursor-pointer transition-colors group",
+                      "cursor-pointer transition-colors group border-b last:border-b-0",
                       row.getIsSelected()
-                        ? "bg-primary/5 hover:bg-primary/8"
+                        ? "bg-accent hover:bg-accent/80"
                         : "hover:bg-muted/40",
                     )}
                     onClick={() => onEditLead(lead)}
@@ -154,7 +154,7 @@ export function LeadsTable({
                     {row.getVisibleCells().map((cell) => (
                       <TableCell
                         key={cell.id}
-                        className="py-2 px-3"
+                        className="py-3 px-3.5 align-middle text-[13px]"
                         style={{ width: cell.column.getSize() }}
                         onClick={cell.column.id === "select" ? (e) => e.stopPropagation() : undefined}
                       >

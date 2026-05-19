@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { runEnrichmentPipeline } from "@/lib/enrichment/pipeline";
+import { enqueueJob } from "@/lib/jobs/scheduler";
 
 export async function POST(
   _request: NextRequest,
@@ -93,18 +93,16 @@ export async function POST(
       );
     }
 
-    // Pipeline erneut starten (fire-and-forget)
-    runEnrichmentPipeline({
+    // Über Scheduler einreihen
+    const state = enqueueJob({
       jobId: id,
       userId: user.id,
       query: searchJob.query,
       location: searchJob.location,
       country: searchJob.country,
-    }).catch((err) => {
-      console.error(`[API] Retry Pipeline-Fehler für Job ${id}:`, err);
     });
 
-    return NextResponse.json({ data: updated });
+    return NextResponse.json({ data: updated, queued: state === "queued" });
   } catch (error) {
     console.error("[API POST /api/leads/search/[id]/retry] Fehler:", error);
     return NextResponse.json(

@@ -66,13 +66,13 @@ export function IndustryCombobox({
             <span
               role="button"
               aria-label="Auswahl zurücksetzen"
-              className="ml-1 rounded-full bg-primary/20 text-primary h-4 w-4 flex items-center justify-center shrink-0 cursor-pointer hover:bg-primary/30 transition-colors"
+              className="ml-1.5 -mr-1 inline-flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground/70 hover:text-foreground hover:bg-accent transition-colors shrink-0"
               onClick={(e) => { e.stopPropagation(); onChange([]); }}
             >
-              <X className="h-2.5 w-2.5" />
+              <X className="h-3 w-3" strokeWidth={1.75} />
             </span>
           ) : (
-            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" strokeWidth={1.75} />
           )}
         </Button>
       </PopoverTrigger>
