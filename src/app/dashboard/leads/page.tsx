@@ -6,7 +6,7 @@ import type { SortingState, VisibilityState } from "@tanstack/react-table";
 import {
   Search,
   Plus,
-  Download,
+  Upload,
   InboxIcon,
   X,
   SlidersHorizontal,
@@ -50,6 +50,7 @@ import { LeadEditSheet } from "@/components/leads/LeadEditSheet";
 import { LeadDeleteDialog } from "@/components/leads/LeadDeleteDialog";
 import { SearchJobsList } from "@/components/leads/SearchJobsList";
 import { LeadSearchForm } from "@/components/leads/LeadSearchForm";
+import { LeadImportDialog } from "@/components/leads/LeadImportDialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandItem } from "@/components/ui/command";
 import { Check } from "lucide-react";
@@ -154,10 +155,15 @@ function FilterTriggerPopover(props: FilterTriggerPopoverProps) {
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-[260px] p-0" align="start">
+      <PopoverContent
+        className="w-[260px] p-0"
+        align="start"
+        onWheel={(e) => e.stopPropagation()}
+        onTouchMove={(e) => e.stopPropagation()}
+      >
         <Command>
           <CommandInput placeholder={searchPlaceholder} className="h-9 text-[13px]" />
-          <CommandList className="max-h-[260px]">
+          <CommandList className="max-h-[260px] overflow-y-auto overscroll-contain">
             <CommandEmpty className="py-4 text-center text-[12px] text-muted-foreground">{emptyText}</CommandEmpty>
             {options.map((opt) => {
               const selected = props.multi
@@ -236,6 +242,8 @@ export default function LeadScrapingPage() {
 
   const [editLead, setEditLead]     = useState<Lead | null>(null);
   const [editOpen, setEditOpen]     = useState(false);
+  const [editMode, setEditMode]    = useState<"edit" | "create">("edit");
+  const [importOpen, setImportOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteIds, setDeleteIds]   = useState<string[]>([]);
   const [crmSettings, setCrmSettings] = useState<Record<string, string | null>>({});
@@ -251,9 +259,13 @@ export default function LeadScrapingPage() {
   const [filterCities, setFilterCities]         = useState<string[]>([]);
   const [filterStates, setFilterStates]         = useState<string[]>([]);
   const [filterCountry, setFilterCountry]       = useState<string>("all");
+  const [filterPresence, setFilterPresence]     = useState<string[]>([]);
   const [filterJobId, setFilterJobId]           = useState<string | null>(null);
 
-  /* Hydration-sicher: localStorage ERST nach Mount lesen, sonst SSR-Mismatch */
+  /* Hydration-sicher: localStorage ERST nach Mount lesen, sonst SSR-Mismatch.
+   * URL-Param ?tab=search hat Vorrang vor persistiertem Tab (Sidebar-Link
+   * "Suchverlauf"). Bewusst window.location statt useSearchParams, damit kein
+   * Suspense-Boundary in der Page nötig wird. */
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
     const p = loadPersistedLeadsState();
@@ -264,9 +276,16 @@ export default function LeadScrapingPage() {
     if (Array.isArray(p.cities))                setFilterCities(p.cities);
     if (Array.isArray(p.states))                setFilterStates(p.states);
     if (typeof p.country === "string")          setFilterCountry(p.country);
+    if (Array.isArray(p.presence))              setFilterPresence(p.presence);
     if (typeof p.activeTab === "string")        setActiveTab(p.activeTab);
     if (typeof p.pageSize === "number" && (PAGE_SIZE_OPTIONS as readonly number[]).includes(p.pageSize)) {
       setPageSizeOverride(p.pageSize);
+    }
+    if (typeof window !== "undefined") {
+      const tabParam = new URLSearchParams(window.location.search).get("tab");
+      if (tabParam === "search" || tabParam === "leads") {
+        setActiveTab(tabParam);
+      }
     }
     setHydrated(true);
   }, []);
@@ -283,11 +302,12 @@ export default function LeadScrapingPage() {
         cities: filterCities,
         states: filterStates,
         country: filterCountry,
+        presence: filterPresence,
         pageSize: pageSizeOverride,
         activeTab,
       } satisfies PersistedLeadsState));
     } catch { /* QuotaExceeded etc. ignorieren */ }
-  }, [hydrated, filterSearch, filterStatus, filterIndustries, filterLegalForms, filterCities, filterStates, filterCountry, pageSizeOverride, activeTab]);
+  }, [hydrated, filterSearch, filterStatus, filterIndustries, filterLegalForms, filterCities, filterStates, filterCountry, filterPresence, pageSizeOverride, activeTab]);
 
   /* ── Sorting & Column Visibility ── */
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -298,7 +318,7 @@ export default function LeadScrapingPage() {
   const [cityOptions, setCityOptions]     = useState<{ value: string; label: string }[]>([]);
   const [countryOptions, setCountryOptions] = useState<{ value: string; label: string }[]>([]);
 
-  const hasActiveFilters = !!filterSearch || filterStatus !== "all" || filterIndustries.length > 0 || filterLegalForms.length > 0 || filterCities.length > 0 || filterStates.length > 0 || filterCountry !== "all" || filterJobId !== null;
+  const hasActiveFilters = !!filterSearch || filterStatus !== "all" || filterIndustries.length > 0 || filterLegalForms.length > 0 || filterCities.length > 0 || filterStates.length > 0 || filterCountry !== "all" || filterPresence.length > 0 || filterJobId !== null;
 
   function resetFilters() {
     setFilterSearch("");
@@ -308,6 +328,7 @@ export default function LeadScrapingPage() {
     setFilterCities([]);
     setFilterStates([]);
     setFilterCountry("all");
+    setFilterPresence([]);
     setFilterJobId(null);
     setLeadsPage(1);
   }
@@ -327,7 +348,11 @@ export default function LeadScrapingPage() {
     })();
   }, []);
 
-  /* ── Fetch filter options (countries — einmalig) ── */
+  /* ── Fetch filter options (countries — einmalig beim Mount) ──
+   * Vorher: Dep [leads] → Refetch bei jedem Tabellen-Reload. Country-Liste
+   * ändert sich nur, wenn neue Leads aus einem neuen Land hinzukommen — das
+   * passiert nach Suchaufträgen (Realtime-Pfad triggert ohnehin fetchLeads).
+   * Statt Polling wird die Liste hier nur beim Mount geladen. */
   useEffect(() => {
     (async () => {
       try {
@@ -339,7 +364,7 @@ export default function LeadScrapingPage() {
         }
       } catch { /* silent */ }
     })();
-  }, [leads]); // refetch when leads change
+  }, []);
 
   /* ── Städte dynamisch nach Land neu laden ── */
   useEffect(() => {
@@ -401,6 +426,11 @@ export default function LeadScrapingPage() {
       if (filterCities.length > 0) params.set("city", filterCities.join(","));
       if (filterStates.length > 0) params.set("state", filterStates.join(","));
       if (filterCountry !== "all") params.set("country", filterCountry);
+      if (filterPresence.includes("ceo")) params.set("has_ceo", "true");
+      if (filterPresence.includes("email")) params.set("has_email", "true");
+      if (filterPresence.includes("phone")) params.set("has_phone", "true");
+      if (filterPresence.includes("website")) params.set("has_website", "true");
+      if (filterPresence.includes("social")) params.set("has_social", "true");
       if (filterJobId) params.set("search_job_id", filterJobId);
       if (sorting.length > 0) {
         params.set("sort_by", sorting[0].id);
@@ -417,7 +447,7 @@ export default function LeadScrapingPage() {
     } finally {
       setLeadsLoading(false);
     }
-  }, [filterSearch, filterStatus, filterIndustries, filterLegalForms, filterCities, filterStates, filterCountry, filterJobId, sorting, effectivePageSize]);
+  }, [filterSearch, filterStatus, filterIndustries, filterLegalForms, filterCities, filterStates, filterCountry, filterPresence, filterJobId, sorting, effectivePageSize]);
 
   const fetchJobs = useCallback(async () => {
     setJobsLoading(true);
@@ -445,7 +475,7 @@ export default function LeadScrapingPage() {
     setIsGlobalSelected(false);
     fetchLeads(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterStatus, filterIndustries, filterLegalForms, filterCities, filterStates, filterCountry, filterJobId, sorting]);
+  }, [filterStatus, filterIndustries, filterLegalForms, filterCities, filterStates, filterCountry, filterPresence, filterJobId, sorting]);
 
   /* ── Debounced text-filter fetch (500ms, min 2 chars or empty) ── */
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -683,7 +713,7 @@ export default function LeadScrapingPage() {
   function handleEditFromSelection() {
     const id = Array.from(selectedIds)[0];
     const lead = leads.find((l) => l.id === id);
-    if (lead) { setEditLead(lead); setEditOpen(true); }
+    if (lead) { setEditLead(lead); setEditMode("edit"); setEditOpen(true); }
   }
 
   function handleDeleteFromSelection() {
@@ -691,21 +721,33 @@ export default function LeadScrapingPage() {
     setDeleteOpen(true);
   }
 
+  /* Zentrale Filter-Serialisierung für Bulk-Aktionen — alle aktiven Frontend-Filter
+   * (Suche, Status, Branchen, Rechtsform, Stadt, Bundesland, Land, Präsenz,
+   *  Suchauftrag) werden ans Backend gespiegelt. So funktionieren "Alle auswählen"
+   * Operationen exakt mit dem, was der User sieht. */
+  const buildBulkFilters = useCallback(() => ({
+    search:        filterSearch || undefined,
+    status:        filterStatus === "all" ? undefined : (filterStatus as LeadStatus),
+    industry:      filterIndustries.length > 0 ? filterIndustries : undefined,
+    legal_form:    filterLegalForms.length > 0 ? filterLegalForms : undefined,
+    city:          filterCities.length > 0 ? filterCities : undefined,
+    state:         filterStates.length > 0 ? filterStates : undefined,
+    country:       filterCountry === "all" ? undefined : filterCountry,
+    search_job_id: filterJobId ?? undefined,
+    has_ceo:       filterPresence.includes("ceo")     || undefined,
+    has_email:     filterPresence.includes("email")   || undefined,
+    has_phone:     filterPresence.includes("phone")   || undefined,
+    has_website:   filterPresence.includes("website") || undefined,
+    has_social:    filterPresence.includes("social")  || undefined,
+  }), [filterSearch, filterStatus, filterIndustries, filterLegalForms, filterCities, filterStates, filterCountry, filterJobId, filterPresence]);
+
   async function handleBulkStatusChange(status: LeadStatus) {
     const ids = Array.from(selectedIds);
-    const payload: any = { action: "status", status };
-    
+    const payload: Record<string, unknown> = { action: "status", status };
+
     if (isGlobalSelected) {
       payload.selectionMode = "all";
-      payload.filters = {
-        search: filterSearch,
-        status: filterStatus === "all" ? undefined : filterStatus,
-        industry: filterIndustries.length > 0 ? filterIndustries : undefined,
-        legal_form: filterLegalForms.length > 0 ? filterLegalForms : undefined,
-        city: filterCities.length > 0 ? filterCities : undefined,
-        state: filterStates.length > 0 ? filterStates : undefined,
-        country: filterCountry === "all" ? undefined : filterCountry,
-      };
+      payload.filters = buildBulkFilters();
     } else {
       payload.ids = ids;
     }
@@ -728,6 +770,7 @@ export default function LeadScrapingPage() {
   /* ── Row-level actions ── */
   function handleEditLead(lead: Lead) {
     setEditLead(lead);
+    setEditMode("edit");
     setEditOpen(true);
   }
 
@@ -770,6 +813,12 @@ export default function LeadScrapingPage() {
           if (filterCities.length > 0) params.set("city", filterCities.join(","));
           if (filterStates.length > 0) params.set("state", filterStates.join(","));
           if (filterCountry !== "all") params.set("country", filterCountry);
+          if (filterJobId) params.set("search_job_id", filterJobId);
+          if (filterPresence.includes("ceo"))     params.set("has_ceo", "true");
+          if (filterPresence.includes("email"))   params.set("has_email", "true");
+          if (filterPresence.includes("phone"))   params.set("has_phone", "true");
+          if (filterPresence.includes("website")) params.set("has_website", "true");
+          if (filterPresence.includes("social"))  params.set("has_social", "true");
           const res = await fetch(`/api/leads?${params.toString()}`);
           if (!res.ok) throw new Error();
           const json = await res.json();
@@ -921,9 +970,9 @@ export default function LeadScrapingPage() {
       <div className="px-4 lg:px-6 space-y-4">
         <div className="flex items-start justify-between gap-6">
           <div className="space-y-1">
-            <h1 className="text-[24px] font-semibold tracking-tight leading-tight">Leads</h1>
+            <h1 className="text-[24px] font-medium tracking-tight leading-tight">Leads</h1>
             <p className="text-[13.5px] text-muted-foreground max-w-xl">
-              Finde, qualifiziere und kontaktiere potenzielle Mandanten in Österreich, Deutschland und der Schweiz.
+              Finde, qualifiziere und kontaktiere potenzielle Leads in Österreich, Deutschland und der Schweiz.
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -931,11 +980,22 @@ export default function LeadScrapingPage() {
               variant="outline"
               size="sm"
               className="h-8 gap-1.5 text-xs font-medium"
-              onClick={() => handleExport("csv")}
-              disabled={leadsLoading}
+              onClick={() => setImportOpen(true)}
             >
-              <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
-              Export
+              <Upload className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Importieren
+            </Button>
+            <Button
+              size="sm"
+              className="h-8 gap-1.5 text-xs font-medium"
+              onClick={() => {
+                setEditLead(null);
+                setEditMode("create");
+                setEditOpen(true);
+              }}
+            >
+              <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Lead erstellen
             </Button>
           </div>
         </div>
@@ -1103,6 +1163,24 @@ export default function LeadScrapingPage() {
                   emptyText="Kein Land gefunden"
                 />
 
+                <FilterTriggerPopover
+                  label="Kriterien"
+                  value={filterPresence.length > 0 ? (filterPresence.length === 1 ? ({ ceo: "Entscheider", email: "E-Mail", phone: "Telefon", website: "Website", social: "Social Media" } as Record<string, string>)[filterPresence[0]] ?? filterPresence[0] : `${filterPresence.length} ausgewählt`) : null}
+                  onClear={() => setFilterPresence([])}
+                  multi
+                  selectValue={filterPresence}
+                  onSelectChange={setFilterPresence}
+                  options={[
+                    { value: "ceo", label: "Entscheider:in" },
+                    { value: "email", label: "E-Mail" },
+                    { value: "phone", label: "Telefon" },
+                    { value: "website", label: "Website" },
+                    { value: "social", label: "Social Media" },
+                  ]}
+                  searchPlaceholder="Filter suchen…"
+                  emptyText="Kein Filter gefunden"
+                />
+
                 {hasActiveFilters && (
                   <button
                     onClick={resetFilters}
@@ -1121,15 +1199,6 @@ export default function LeadScrapingPage() {
                   </span>
                 )}
                 <DataTableViewOptions table={toolbarTable} />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 gap-1.5 text-xs font-medium"
-                  onClick={() => handleExport("csv")}
-                >
-                  <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
-                  Export
-                </Button>
               </div>
             </div>
 
@@ -1278,15 +1347,7 @@ export default function LeadScrapingPage() {
         totalCount={leadsCount}
         selectedIds={Array.from(selectedIds)}
         isGlobalSelected={isGlobalSelected}
-        filters={{
-          search: filterSearch || undefined,
-          status: filterStatus === "all" ? undefined : (filterStatus as LeadStatus),
-          industry: filterIndustries.length > 0 ? filterIndustries : undefined,
-          legal_form: filterLegalForms.length > 0 ? filterLegalForms : undefined,
-          city: filterCities.length > 0 ? filterCities : undefined,
-          state: filterStates.length > 0 ? filterStates : undefined,
-          country: filterCountry === "all" ? undefined : filterCountry,
-        }}
+        filters={buildBulkFilters()}
         crmSettings={crmSettings}
         onClear={() => {
           setSelectedIds(new Set());
@@ -1299,12 +1360,20 @@ export default function LeadScrapingPage() {
         onExport={handleExport}
       />
 
-      {/* Edit Sheet */}
+      {/* Edit / Create Sheet */}
       <LeadEditSheet
         lead={editLead}
         open={editOpen}
         onOpenChange={setEditOpen}
         onSaved={handleSaved}
+        mode={editMode}
+      />
+
+      {/* Import Dialog */}
+      <LeadImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onImported={() => fetchLeads(1)}
       />
 
       {/* Delete Dialog */}
@@ -1314,15 +1383,7 @@ export default function LeadScrapingPage() {
         leadIds={deleteIds}
         isGlobalSelected={isGlobalSelected}
         totalCount={leadsCount}
-        filters={{
-          search: filterSearch,
-          status: filterStatus === "all" ? undefined : (filterStatus as LeadStatus),
-          industry: filterIndustries.length > 0 ? filterIndustries : undefined,
-          legal_form: filterLegalForms.length > 0 ? filterLegalForms : undefined,
-          city: filterCities.length > 0 ? filterCities : undefined,
-          state: filterStates.length > 0 ? filterStates : undefined,
-          country: filterCountry === "all" ? undefined : filterCountry,
-        }}
+        filters={buildBulkFilters()}
         onDeleted={handleDeleted}
       />
     </div>

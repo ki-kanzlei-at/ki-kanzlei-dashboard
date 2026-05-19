@@ -3,7 +3,7 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Search, Loader2, Sparkles, Upload, Layers, MapPin, Globe2 } from "lucide-react";
+import { Search, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -47,10 +47,11 @@ const searchSchema = z
     const hasCity      = data.city && data.city.trim().length >= 1;
     const hasLocations = data.locations && data.locations.length > 0;
 
-    if (!hasQuery && !hasCity) {
+    /* Branche ist Pflicht — das Backend verlangt query. Stadt allein reicht nicht. */
+    if (!hasQuery) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Bitte Branche oder Stadt angeben",
+        message: "Branche ist erforderlich (mind. 2 Zeichen)",
         path: ["query"],
       });
     }
@@ -128,9 +129,9 @@ export function LeadSearchForm({ onSubmit, isSearching, defaultCountry, defaultR
     <Form {...form}>
       <Card className="border-border/70 shadow-none">
         <CardHeader className="pb-4 border-b border-border/70">
-          <CardTitle className="text-base font-semibold tracking-tight">Neue Suche</CardTitle>
+          <CardTitle className="text-base font-medium tracking-tight">Neue Suche</CardTitle>
           <CardDescription className="text-[13px]">
-            Branche, Region und Filter — wir finden die passenden Mandanten.
+            Branche, Region und Filter — wir finden die passenden Leads.
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-4 space-y-4">
@@ -165,7 +166,6 @@ export function LeadSearchForm({ onSubmit, isSearching, defaultCountry, defaultR
               render={({ field }) => (
                 <FormItem className="min-w-0">
                   <FormLabel className="text-xs font-medium flex items-center gap-1.5">
-                    <MapPin className="h-3 w-3 text-muted-foreground/70" strokeWidth={1.75} />
                     {regionLabel}
                     {selectedLocations.length > 1 && (
                       <span className="ml-auto text-[10.5px] text-primary font-normal">
@@ -195,7 +195,6 @@ export function LeadSearchForm({ onSubmit, isSearching, defaultCountry, defaultR
 
             <FormItem className="min-w-0">
               <FormLabel className="text-xs font-medium flex items-center gap-1.5">
-                <Globe2 className="h-3 w-3 text-muted-foreground/70" strokeWidth={1.75} />
                 Land
               </FormLabel>
               <FilterCombobox
@@ -277,8 +276,8 @@ export function LeadSearchForm({ onSubmit, isSearching, defaultCountry, defaultR
             />
           </div>
 
-          {/* Footer: Toggles + Vorlagen / CSV Import */}
-          <div className="flex flex-wrap items-center gap-4 pt-3 border-t border-border/70 text-[13px] text-muted-foreground">
+          {/* Footer: Toggles */}
+          <div className="flex flex-wrap items-center gap-4 pt-1 text-[13px] text-muted-foreground">
             <FormField
               control={form.control}
               name="require_ceo"
@@ -345,16 +344,6 @@ export function LeadSearchForm({ onSubmit, isSearching, defaultCountry, defaultR
               )}
             />
 
-            <div className="ml-auto flex items-center gap-2">
-              <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 text-xs font-medium" disabled>
-                <Layers className="h-3.5 w-3.5" strokeWidth={1.75} />
-                Vorlagen
-              </Button>
-              <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 text-xs font-medium" disabled>
-                <Upload className="h-3.5 w-3.5" strokeWidth={1.75} />
-                CSV importieren
-              </Button>
-            </div>
           </div>
 
         </CardContent>

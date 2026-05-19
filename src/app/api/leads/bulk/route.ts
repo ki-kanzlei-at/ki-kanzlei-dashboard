@@ -50,6 +50,21 @@ function applyFilters(query: any, filters: LeadFilters) {
     hasFilter = true;
   }
 
+  /* Präsenz-Filter (Daten vorhanden) — auch in Bulk-Aktionen respektieren */
+  if (filters.has_ceo)     { query = query.not("ceo_name", "is", null).neq("ceo_name", ""); hasFilter = true; }
+  if (filters.has_email)   { query = query.not("email",    "is", null).neq("email",    ""); hasFilter = true; }
+  if (filters.has_phone)   { query = query.not("phone",    "is", null).neq("phone",    ""); hasFilter = true; }
+  if (filters.has_website) { query = query.not("website",  "is", null).neq("website",  ""); hasFilter = true; }
+  if (filters.has_social) {
+    query = query.or(
+      "social_linkedin.not.is.null,social_facebook.not.is.null,social_instagram.not.is.null,social_twitter.not.is.null,social_youtube.not.is.null,social_tiktok.not.is.null",
+    );
+    hasFilter = true;
+  }
+
+  /* Suchauftrag-Filter — alle Leads aus einem konkreten Job */
+  if (filters.search_job_id) { query = query.eq("search_job_id", filters.search_job_id); hasFilter = true; }
+
   if (!hasFilter) {
     query = query.not("id", "is", null);
   }

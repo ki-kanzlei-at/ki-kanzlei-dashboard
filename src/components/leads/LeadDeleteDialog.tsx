@@ -88,7 +88,7 @@ export function LeadDeleteDialog({
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent className="sm:max-w-[420px]">
         <AlertDialogHeader>
-          <AlertDialogTitle className="flex items-center gap-2">
+          <AlertDialogTitle className="flex items-center gap-2 font-medium">
             <AlertTriangle className="h-5 w-5 text-destructive" />
             {count === 1 ? "Lead löschen" : `${count} Leads löschen`}
           </AlertDialogTitle>

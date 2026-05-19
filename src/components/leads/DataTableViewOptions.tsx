@@ -12,14 +12,18 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+/* Labels für die "Sichtbare Spalten" Auswahl — müssen 1:1 zu den IDs/accessorKeys
+ * in createColumns() in columns.tsx passen. */
 const COLUMN_LABELS: Record<string, string> = {
-  company:  "Firma",
-  industry: "Branche",
-  city:     "Ort",
-  contact:  "Kontakt",
-  website:  "Website",
-  social:   "Social Media",
-  status:   "Status",
+  company:    "Firma",
+  industry:   "Branche",
+  legal_form: "Rechtsform",
+  city:       "Ort",
+  contact:    "Kontakt",
+  ceo:        "Entscheider:in",
+  website:    "Website",
+  social:     "Social Media",
+  status:     "Status",
 };
 
 interface DataTableViewOptionsProps<TData> {

@@ -108,11 +108,19 @@ export async function POST(request: NextRequest) {
     const displayLocation = hasCity
       ? hasLocation ? `${city!.trim()} (${location!.trim()})` : city!.trim()
       : effectiveLocation;
+    /* Komplette Filter mitspeichern, damit Pending-Jobs nach Server-Restart mit
+     * exakt denselben Kriterien wieder anlaufen und die UI je Job die angewendeten
+     * Filter anzeigen kann. */
     const searchJob = await createSearchJob({
       user_id: user.id,
       query: query.trim(),
       location: displayLocation,
       country,
+      city: hasCity ? city!.trim() : null,
+      company_type: company_type !== "all" ? company_type : null,
+      require_ceo,
+      require_email,
+      require_website,
     });
 
     // Über Scheduler einreihen — startet direkt oder bleibt pending (Queue)

@@ -123,7 +123,7 @@ async function pickNextPendingFromDB(): Promise<ScheduledJobParams | null> {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
     .from("search_jobs")
-    .select("id, user_id, query, location, country")
+    .select("id, user_id, query, location, country, city, company_type, require_ceo, require_email, require_website")
     .eq("status", "pending")
     .order("created_at", { ascending: true })
     .limit(50);
@@ -143,6 +143,11 @@ async function pickNextPendingFromDB(): Promise<ScheduledJobParams | null> {
       query: row.query,
       location: row.location,
       country: row.country,
+      city: row.city ?? undefined,
+      companyType: row.company_type ?? undefined,
+      requireCeo: row.require_ceo ?? false,
+      requireEmail: row.require_email ?? false,
+      requireWebsite: row.require_website ?? false,
     };
   }
   return null;

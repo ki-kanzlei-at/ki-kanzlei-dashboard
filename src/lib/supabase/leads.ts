@@ -133,6 +133,18 @@ export async function getLeads(
     query = query.eq("search_job_id", filters.search_job_id);
   }
 
+  /* Präsenz-Filter: nur Leads mit bestimmten Feldern (nicht null & nicht leer) */
+  if (filters.has_ceo) { query = query.not("ceo_name", "is", null); query = (query as any).neq("ceo_name", ""); }
+  if (filters.has_email) { query = query.not("email", "is", null); query = (query as any).neq("email", ""); }
+  if (filters.has_phone) { query = query.not("phone", "is", null); query = (query as any).neq("phone", ""); }
+  if (filters.has_website) { query = query.not("website", "is", null); query = (query as any).neq("website", ""); }
+  /* Social-Media-Filter: mindestens ein Profil (LinkedIn, Facebook, Instagram, X, YouTube, TikTok) gesetzt */
+  if (filters.has_social) {
+    query = query.or(
+      "social_linkedin.not.is.null,social_facebook.not.is.null,social_instagram.not.is.null,social_twitter.not.is.null,social_youtube.not.is.null,social_tiktok.not.is.null",
+    );
+  }
+
   /* Volltextsuche über mehrere Spalten */
   if (filters.search) {
     const term = `%${filters.search}%`;

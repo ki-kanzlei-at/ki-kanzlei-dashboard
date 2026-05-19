@@ -203,31 +203,31 @@ export function AppSidebar({ user, role = "user" }: AppSidebarProps) {
                                                 className="text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground data-[active=true]:font-medium aria-disabled:opacity-50 aria-disabled:cursor-not-allowed [&_svg]:size-[15px]"
                                             >
                                                 {disabled ? (
-                                                    <span aria-disabled="true" className="flex items-center gap-2 w-full">
+                                                    <span aria-disabled="true" className="flex items-center gap-2 w-full overflow-hidden">
                                                         <Icon className="shrink-0" />
                                                         <span className="flex-1 truncate">{name}</span>
                                                         {pip != null && (
-                                                            <span className="group-data-[collapsible=icon]:hidden ml-auto inline-grid place-items-center min-w-[16px] h-4 px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-medium">
+                                                            <span className="group-data-[collapsible=icon]:hidden ml-auto mr-1 inline-grid place-items-center min-w-[16px] h-4 px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-medium">
                                                                 {pip}
                                                             </span>
                                                         )}
                                                         {displayCount != null && (
-                                                            <span className="group-data-[collapsible=icon]:hidden ml-auto text-[11px] text-muted-foreground tabular-nums">
+                                                            <span className="group-data-[collapsible=icon]:hidden ml-auto mr-1 text-[11px] text-muted-foreground tabular-nums">
                                                                 {displayCount}
                                                             </span>
                                                         )}
                                                     </span>
                                                 ) : (
-                                                    <Link href={href} className="flex items-center gap-2 w-full">
+                                                    <Link href={href} className="flex items-center gap-2 w-full overflow-hidden">
                                                         <Icon className="shrink-0" />
                                                         <span className="flex-1 truncate">{name}</span>
                                                         {pip != null && (
-                                                            <span className="group-data-[collapsible=icon]:hidden ml-auto inline-grid place-items-center min-w-[16px] h-4 px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-medium">
+                                                            <span className="group-data-[collapsible=icon]:hidden ml-auto mr-1 inline-grid place-items-center min-w-[16px] h-4 px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-medium">
                                                                 {pip}
                                                             </span>
                                                         )}
                                                         {displayCount != null && (
-                                                            <span className={`group-data-[collapsible=icon]:hidden ml-auto text-[11px] tabular-nums ${active ? "text-sidebar-accent-foreground/80" : "text-muted-foreground"}`}>
+                                                            <span className={`group-data-[collapsible=icon]:hidden ml-auto mr-1 text-[11px] tabular-nums ${active ? "text-sidebar-accent-foreground/80" : "text-muted-foreground"}`}>
                                                                 {displayCount}
                                                             </span>
                                                         )}

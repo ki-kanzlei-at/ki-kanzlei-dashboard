@@ -1,11 +1,12 @@
-/* ── API Route: GET /api/leads ──
- * Leads abrufen mit optionalen Query-Parametern für Filterung und Pagination.
+/* ── API Route: GET & POST /api/leads ──
+ * GET: Leads abrufen mit optionalen Query-Parametern für Filterung und Pagination.
+ * POST: Einen oder mehrere Leads erstellen.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getLeads } from "@/lib/supabase/leads";
-import type { LeadStatus } from "@/types/leads";
+import { getLeads, insertLeads } from "@/lib/supabase/leads";
+import type { LeadStatus, LeadInsert } from "@/types/leads";
 
 const VALID_STATUSES: LeadStatus[] = [
   "new", "contacted", "interested", "not_interested", "converted",
@@ -43,6 +44,11 @@ export async function GET(request: NextRequest) {
     const stateRaw = searchParams.get("state");
     const state = stateRaw ? stateRaw.split(",").filter(Boolean) : undefined;
     const searchJobId = searchParams.get("search_job_id");
+    const hasCeo = searchParams.get("has_ceo");
+    const hasEmail = searchParams.get("has_email");
+    const hasPhone = searchParams.get("has_phone");
+    const hasWebsite = searchParams.get("has_website");
+    const hasSocial = searchParams.get("has_social");
     const sortBy = searchParams.get("sort_by");
     const sortDir = searchParams.get("sort_dir");
     const page = parseInt(searchParams.get("page") ?? "1", 10);
@@ -63,9 +69,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    if (isNaN(limit) || limit < 1 || limit > 100) {
+    if (isNaN(limit) || limit < 1 || limit > 500) {
       return NextResponse.json(
-        { error: "Ungültiger limit-Parameter (1-100)" },
+        { error: "Ungültiger limit-Parameter (1-500)" },
         { status: 400 },
       );
     }
@@ -82,6 +88,11 @@ export async function GET(request: NextRequest) {
         state: state ?? undefined,
         legal_form: legalForm ?? undefined,
         search_job_id: searchJobId ?? undefined,
+        has_ceo: hasCeo === "true" ? true : undefined,
+        has_email: hasEmail === "true" ? true : undefined,
+        has_phone: hasPhone === "true" ? true : undefined,
+        has_website: hasWebsite === "true" ? true : undefined,
+        has_social: hasSocial === "true" ? true : undefined,
       },
       { page, pageSize: limit },
       {
@@ -97,5 +108,51 @@ export async function GET(request: NextRequest) {
       { error: "Interner Serverfehler" },
       { status: 500 },
     );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json({ error: "Nicht authentifiziert" }, { status: 401 });
+    }
+
+    const body = await request.json();
+
+    // Support single lead or array of leads
+    const leadsInput: LeadInsert[] = Array.isArray(body) ? body : [body];
+
+    if (leadsInput.length === 0) {
+      return NextResponse.json({ error: "Keine Leads übergeben" }, { status: 400 });
+    }
+
+    // Validate: company is required
+    for (const lead of leadsInput) {
+      if (!lead.company || typeof lead.company !== "string" || !lead.company.trim()) {
+        return NextResponse.json({ error: "Firma ist ein Pflichtfeld" }, { status: 400 });
+      }
+      // Ensure user_id is set
+      lead.user_id = user.id;
+      if (!lead.status) lead.status = "new";
+      /* DB-Spalte `name` ist NOT NULL (Legacy-Schema). Wenn das Form nichts
+       * mitliefert, fallen wir auf den Entscheider-Namen oder die Firma zurück
+       * — beides sind sinnvolle Defaults für Anzeigen/Suche. */
+      if (!lead.name || (typeof lead.name === "string" && !lead.name.trim())) {
+        lead.name = lead.ceo_name?.trim() || lead.company.trim();
+      }
+    }
+
+    const created = await insertLeads(leadsInput);
+
+    return NextResponse.json({ data: created, count: created.length }, { status: 201 });
+  } catch (error) {
+    console.error("[API POST /api/leads] Fehler:", error);
+    return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

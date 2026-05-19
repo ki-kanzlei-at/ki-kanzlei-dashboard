@@ -193,7 +193,7 @@ export function createColumns(actions: ColumnActions): ColumnDef<Lead>[] {
       cell: ({ getValue }) => {
         const v = getValue() as string | null;
         if (!v) return <span className="text-xs text-muted-foreground/50">—</span>;
-        return <span className="text-[12.5px] text-muted-foreground">{v}</span>;
+        return <span className="text-[12.5px] text-muted-foreground truncate block max-w-[140px]" title={v}>{v}</span>;
       },
       size: 150,
     },
@@ -205,9 +205,9 @@ export function createColumns(actions: ColumnActions): ColumnDef<Lead>[] {
       cell: ({ getValue }) => {
         const lf = getValue() as string | null;
         if (!lf) return <span className="text-xs text-muted-foreground/50">—</span>;
-        return <span className="text-xs text-muted-foreground">{lf}</span>;
+        return <span className="text-xs text-muted-foreground truncate block max-w-[120px]">{lf}</span>;
       },
-      size: 120,
+      size: 140,
     },
 
     /* Ort */
@@ -293,14 +293,11 @@ export function createColumns(actions: ColumnActions): ColumnDef<Lead>[] {
       header: "Entscheider:in",
       cell: ({ row }) => {
         const lead = row.original;
-        const ceoName = lead.ceo_name ?? lead.name;
+        const ceoName = lead.ceo_name;
         if (!ceoName) return <span className="text-xs text-muted-foreground/50">—</span>;
         return (
           <div className="min-w-0 leading-tight">
             <div className="text-[13px] text-foreground truncate">{ceoName}</div>
-            {lead.ceo_title && (
-              <div className="text-[11px] text-muted-foreground truncate">{lead.ceo_title}</div>
-            )}
           </div>
         );
       },

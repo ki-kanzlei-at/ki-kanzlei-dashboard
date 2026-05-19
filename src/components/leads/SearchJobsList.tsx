@@ -11,10 +11,13 @@ import {
   Trash2,
   RotateCcw,
   MoreHorizontal,
+  Mail,
+  Globe,
+  User as UserIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { COMPANY_TYPE_OPTIONS } from "@/types/leads";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -85,6 +88,11 @@ const COUNTRY_LABELS: Record<string, string> = {
   CH: "Schweiz",
 };
 
+/* Rechtsform-Lookup: konvertiert den DB-Wert (gmbh, ag, …) zum Anzeige-Label */
+const COMPANY_TYPE_LABELS = Object.fromEntries(
+  COMPANY_TYPE_OPTIONS.map((o) => [o.value, o.label]),
+) as Record<string, string>;
+
 function formatETA(estimatedEnd: string | null): string | null {
   if (!estimatedEnd) return null;
   const remainingMs = new Date(estimatedEnd).getTime() - Date.now();
@@ -127,7 +135,7 @@ export function SearchJobsList({
   const [cancellingIds, setCancellingIds] = useState<Set<string>>(new Set());
   const [deletingIds, setDeletingIds]     = useState<Set<string>>(new Set());
   const [retryingIds, setRetryingIds]     = useState<Set<string>>(new Set());
-  const [bulkDeleting, setBulkDeleting]   = useState(false);
+  const [bulkRetrying, setBulkRetrying]   = useState(false);
   const [page, setPage]                   = useState(1);
 
   /* Aktive immer oben, fertige paginiert */
@@ -184,23 +192,40 @@ export function SearchJobsList({
     }
   }
 
-  async function handleBulkDelete() {
-    if (doneJobs.length === 0) return;
-    setBulkDeleting(true);
+  /* Bulk-Retry: stösst alle Jobs im Status "failed" parallel neu an. Jeder Retry
+   * geht über den existierenden /retry-Endpoint, der den DB-Status auf pending
+   * setzt und den Scheduler informiert. Sammelt Erfolg/Fehler-Counts. */
+  async function handleBulkRetry() {
+    const failedJobs = doneJobs.filter((j) => j.status === "failed");
+    if (failedJobs.length === 0) return;
+    setBulkRetrying(true);
+    let successCount = 0;
+    let errorCount = 0;
     try {
-      const res = await fetch("/api/leads/search/bulk", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: doneJobs.map((j) => j.id) }),
-      });
-      if (!res.ok) throw new Error();
-      toast.success(`${doneJobs.length} Suchaufträge gelöscht`);
-      setPage(1);
-      onBulkDeleted?.(doneJobs.map((j) => j.id));
-    } catch {
-      toast.error("Bulk-Löschen fehlgeschlagen");
+      const results = await Promise.allSettled(
+        failedJobs.map((j) =>
+          fetch(`/api/leads/search/${j.id}/retry`, { method: "POST" })
+            .then(async (res) => {
+              if (!res.ok) throw new Error();
+              const json = await res.json();
+              onJobRetried?.(json.data as SearchJob);
+              return true;
+            }),
+        ),
+      );
+      for (const r of results) {
+        if (r.status === "fulfilled") successCount++;
+        else errorCount++;
+      }
+      if (successCount > 0 && errorCount === 0) {
+        toast.success(`${successCount} fehlgeschlagene Suchen erneut gestartet`);
+      } else if (successCount > 0) {
+        toast.warning(`${successCount} neu gestartet, ${errorCount} fehlgeschlagen`);
+      } else {
+        toast.error("Wiederholen fehlgeschlagen");
+      }
     } finally {
-      setBulkDeleting(false);
+      setBulkRetrying(false);
     }
   }
 
@@ -261,20 +286,20 @@ export function SearchJobsList({
       {/* Count-Bar — schlanker, ohne AI-Tropes (Pulse-Dot raus) */}
       <div className="px-4 py-2.5 border-b border-border flex items-center justify-between gap-2 flex-wrap bg-card">
         <div className="text-[12.5px] text-muted-foreground">
-          <b className="text-foreground font-semibold">{jobs.length.toLocaleString("de-DE")}</b> Suchaufträge
-          {runningCount > 0 && <span className="ml-3">· {runningCount} {runningCount === 1 ? "aktiv" : "aktiv"}</span>}
+          <b className="text-foreground font-medium">{jobs.length.toLocaleString("de-DE")}</b> Suchaufträge
+          {runningCount > 0 && <span className="ml-3">· {runningCount} aktiv</span>}
           {pendingCount > 0 && <span className="ml-3">· {pendingCount} in Warteschlange</span>}
         </div>
-        {doneJobs.length > 1 && (
+        {doneJobs.some((j) => j.status === "failed") && (
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 text-xs text-muted-foreground hover:text-destructive gap-1.5"
-            onClick={handleBulkDelete}
-            disabled={bulkDeleting}
+            className="h-7 text-xs text-muted-foreground hover:text-foreground gap-1.5"
+            onClick={handleBulkRetry}
+            disabled={bulkRetrying}
           >
-            {bulkDeleting ? <Loader2 className="h-3 w-3 animate-spin" strokeWidth={1.75} /> : <Trash2 className="h-3 w-3" strokeWidth={1.75} />}
-            Abgeschlossene löschen
+            {bulkRetrying ? <Loader2 className="h-3 w-3 animate-spin" strokeWidth={1.75} /> : <RotateCcw className="h-3 w-3" strokeWidth={1.75} />}
+            Fehlgeschlagene wiederholen
           </Button>
         )}
       </div>
@@ -284,12 +309,15 @@ export function SearchJobsList({
         <Table className="table-fixed">
           <TableHeader>
             <TableRow className="hover:bg-transparent border-b">
-              <TableHead className="px-3 text-xs font-medium" style={{ width: 260 }}>Suchbegriff</TableHead>
-              <TableHead className="px-3 text-xs font-medium" style={{ width: 150 }}>Region</TableHead>
-              <TableHead className="px-3 text-xs font-medium" style={{ width: 110 }}>Land</TableHead>
+              <TableHead className="px-3 text-xs font-medium" style={{ width: 220 }}>Suchbegriff</TableHead>
+              <TableHead className="px-3 text-xs font-medium" style={{ width: 130 }}>Bundesland</TableHead>
+              <TableHead className="px-3 text-xs font-medium" style={{ width: 110 }}>Stadt</TableHead>
+              <TableHead className="px-3 text-xs font-medium" style={{ width: 100 }}>Land</TableHead>
+              <TableHead className="px-3 text-xs font-medium" style={{ width: 100 }}>Rechtsform</TableHead>
+              <TableHead className="px-3 text-xs font-medium" style={{ width: 110 }}>Kriterien</TableHead>
               <TableHead className="px-3 text-xs font-medium" style={{ width: 120 }}>Status</TableHead>
-              <TableHead className="px-3 text-xs font-medium" style={{ width: 220 }}>Fortschritt</TableHead>
-              <TableHead className="px-3 text-xs font-medium" style={{ width: 150 }}>Erstellt</TableHead>
+              <TableHead className="px-3 text-xs font-medium" style={{ width: 200 }}>Fortschritt</TableHead>
+              <TableHead className="px-3 text-xs font-medium" style={{ width: 120 }}>Erstellt</TableHead>
               <TableHead className="px-3 text-xs font-medium" style={{ width: 48 }}></TableHead>
             </TableRow>
           </TableHeader>
@@ -319,75 +347,170 @@ export function SearchJobsList({
                   )}
                   onClick={isCompleted && onJobClick ? () => onJobClick(job.id) : undefined}
                 >
-                  {/* Suchbegriff — pur, Status nur im Status-Spalte */}
+                  {/* Suchbegriff — gleiche Typo wie Lead-Firma (13px medium) */}
                   <TableCell className="py-2 px-3">
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <p className="text-sm font-medium truncate leading-tight">{job.query}</p>
+                        <p className="text-[13px] font-medium leading-tight text-foreground truncate">{job.query}</p>
                       </TooltipTrigger>
                       <TooltipContent>{job.query}</TooltipContent>
                     </Tooltip>
                   </TableCell>
 
-                  {/* Region */}
+                  {/* Bundesland (location) */}
                   <TableCell className="py-2 px-3">
-                    <span className="text-xs text-muted-foreground truncate block">
+                    <span className="text-[12.5px] text-muted-foreground truncate block">
                       {job.location}
                     </span>
                   </TableCell>
 
+                  {/* Stadt — Legacy-Jobs haben kein city → "—" */}
+                  <TableCell className="py-2 px-3">
+                    {job.city ? (
+                      <span className="text-[12.5px] text-muted-foreground truncate block">{job.city}</span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground/50">—</span>
+                    )}
+                  </TableCell>
+
                   {/* Land */}
                   <TableCell className="py-2 px-3">
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-[12.5px] text-muted-foreground">
                       {COUNTRY_LABELS[job.country] ?? job.country}
                     </span>
                   </TableCell>
 
+                  {/* Rechtsform */}
+                  <TableCell className="py-2 px-3">
+                    {job.company_type ? (
+                      <span className="text-[12.5px] text-muted-foreground truncate block">
+                        {COMPANY_TYPE_LABELS[job.company_type] ?? job.company_type}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground/50">Alle</span>
+                    )}
+                  </TableCell>
+
+                  {/* Kriterien — Chips für die gesetzten Filter */}
+                  <TableCell className="py-2 px-3">
+                    {(job.require_ceo || job.require_email || job.require_website) ? (
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {job.require_ceo && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-muted text-muted-foreground">
+                                <UserIcon className="h-3 w-3" strokeWidth={1.75} />
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>Nur mit Geschäftsführer:in</TooltipContent>
+                          </Tooltip>
+                        )}
+                        {job.require_email && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-muted text-muted-foreground">
+                                <Mail className="h-3 w-3" strokeWidth={1.75} />
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>Nur mit E-Mail</TooltipContent>
+                          </Tooltip>
+                        )}
+                        {job.require_website && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-muted text-muted-foreground">
+                                <Globe className="h-3 w-3" strokeWidth={1.75} />
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>Nur mit Website</TooltipContent>
+                          </Tooltip>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground/50">Keine</span>
+                    )}
+                  </TableCell>
+
                   {/* Status */}
-                  <TableCell className="py-2.5 px-3">
+                  <TableCell className="py-2 px-3">
                     <span className={cn("badge-status", cfg.className)}>
                       <span className="dot" />
                       {cfg.label}
                     </span>
                   </TableCell>
 
-                  {/* Fortschritt */}
+                  {/* Fortschritt — modern: kompakte Metrik-Zeile + dünne Bar */}
                   <TableCell className="py-2 px-3">
-                    <div className="space-y-1 min-w-0">
-                      {isRunning && progressPercent !== undefined && (
-                        <Progress value={progressPercent} className="h-1" />
-                      )}
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                        {(job.results_count > 0 || job.total_count) && (
-                          <span>
-                            {job.results_count}
-                            {job.total_count ? ` von ${job.total_count}` : ""} Leads
-                          </span>
-                        )}
-                        {etaText && <span className="text-primary/70">{etaText}</span>}
-                        {isPending && queuePos > 0 && (
-                          <span className="text-primary/70">
-                            {queuePos === 1 ? "startet gleich" : `Position ${queuePos}`}
-                          </span>
-                        )}
-                        {job.status === "failed" && job.error_message && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span className="flex items-center gap-1 text-muted-foreground truncate">
-                                <AlertCircle className="h-3 w-3 shrink-0" strokeWidth={1.75} />
-                                <span className="truncate">{job.error_message}</span>
+                    <div className="space-y-1.5 min-w-0">
+                      {/* Zeile 1: Zahl/Prozent + ETA/Status-Hinweis */}
+                      <div className="flex items-baseline justify-between gap-2">
+                        <div className="flex items-baseline gap-1.5 min-w-0">
+                          {(job.results_count > 0 || job.total_count) ? (
+                            <>
+                              <span className="text-[13px] font-medium text-foreground tabular-nums">
+                                {job.results_count.toLocaleString("de-DE")}
                               </span>
-                            </TooltipTrigger>
-                            <TooltipContent>{job.error_message}</TooltipContent>
-                          </Tooltip>
+                              {job.total_count ? (
+                                <span className="text-[11px] text-muted-foreground tabular-nums">
+                                  / {job.total_count.toLocaleString("de-DE")}
+                                </span>
+                              ) : null}
+                              <span className="text-[11px] text-muted-foreground">Leads</span>
+                            </>
+                          ) : isPending ? (
+                            <span className="text-[12px] text-muted-foreground">In Warteschlange</span>
+                          ) : (
+                            <span className="text-[11px] text-muted-foreground/60">—</span>
+                          )}
+                        </div>
+                        {progressPercent !== undefined && (
+                          <span className="text-[11px] font-medium text-primary tabular-nums shrink-0">
+                            {progressPercent}%
+                          </span>
                         )}
                       </div>
+
+                      {/* Progress-Bar — nur wenn aktiv oder Zwischenstand */}
+                      {(isRunning || (progressPercent !== undefined && progressPercent < 100)) && (
+                        <div className="h-1 w-full bg-muted rounded-full overflow-hidden">
+                          <div
+                            className={cn(
+                              "h-full rounded-full transition-all duration-500 ease-out",
+                              isRunning ? "bg-primary" : "bg-primary/60",
+                            )}
+                            style={{ width: `${progressPercent ?? 0}%` }}
+                          />
+                        </div>
+                      )}
+
+                      {/* Zeile 3: ETA / Queue / Fehler — nur wenn relevant */}
+                      {(etaText || (isPending && queuePos > 0) || (job.status === "failed" && job.error_message)) && (
+                        <div className="flex items-center gap-2 text-[11px]">
+                          {etaText && <span className="text-primary/80">{etaText}</span>}
+                          {isPending && queuePos > 0 && (
+                            <span className="text-primary/80">
+                              {queuePos === 1 ? "startet gleich" : `Position ${queuePos}`}
+                            </span>
+                          )}
+                          {job.status === "failed" && job.error_message && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="flex items-center gap-1 text-muted-foreground truncate">
+                                  <AlertCircle className="h-3 w-3 shrink-0" strokeWidth={1.75} />
+                                  <span className="truncate">{job.error_message}</span>
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>{job.error_message}</TooltipContent>
+                            </Tooltip>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </TableCell>
 
                   {/* Erstellt */}
                   <TableCell className="py-2 px-3">
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-[12.5px] text-muted-foreground">
                       {formatTime(job.created_at)}
                     </span>
                   </TableCell>

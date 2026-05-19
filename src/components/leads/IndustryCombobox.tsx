@@ -76,10 +76,17 @@ export function IndustryCombobox({
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[280px] p-0" align="start">
+      <PopoverContent
+        className="w-[280px] p-0"
+        align="start"
+        /* Wheel-Event nicht an die darunterliegende ScrollArea (LeadEditSheet) bubblen.
+         * Sonst scrollt die Sheet statt der Branchenliste, gefühlt "geht nicht". */
+        onWheel={(e) => e.stopPropagation()}
+        onTouchMove={(e) => e.stopPropagation()}
+      >
         <Command>
           <CommandInput placeholder="Branche suchen..." />
-          <CommandList className="max-h-60 overflow-y-auto">
+          <CommandList className="max-h-[260px] overflow-y-auto overscroll-contain">
             <CommandEmpty>Keine Branche gefunden</CommandEmpty>
             {items.map((opt) => (
               <CommandItem

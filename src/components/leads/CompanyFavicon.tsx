@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Building2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -28,8 +28,17 @@ export function CompanyFavicon({ website, size = 7, className }: CompanyFaviconP
     try {
       const url = website.startsWith("http") ? new URL(website) : new URL("https://" + website);
       domain = url.hostname.replace(/^www\./, "");
+      /* Plausibilitäts-Check: mind. ein Punkt im Host, sonst noch nicht fertig getippt
+       * (verhindert Favicon-Requests für "wien", "neu", "https://test"). */
+      if (!domain.includes(".") || domain.length < 4) domain = null;
     } catch { /* ungültige URL */ }
   }
+
+  /* Wenn der User die URL ändert, einen ggf. zuvor fehlgeschlagenen Favicon-Load
+   * neu versuchen — sonst bliebe das Fallback-Icon kleben. */
+  useEffect(() => {
+    setFailed(false);
+  }, [domain]);
 
   // Tailwind macht keine dynamischen Klassen-Strings → wir mappen explizit
   const sizeMap: Record<number, { box: string; iconSize: string; imgSize: number }> = {

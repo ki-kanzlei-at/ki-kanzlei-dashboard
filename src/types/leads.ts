@@ -19,6 +19,13 @@ export interface LeadFilters {
   ids?: string[];
   /** Filter auf alle Leads aus einem konkreten Suchauftrag */
   search_job_id?: string;
+  /** Präsenz-Filter: nur Leads mit bestimmten Feldern */
+  has_ceo?: boolean;
+  has_email?: boolean;
+  has_phone?: boolean;
+  has_website?: boolean;
+  /** Lead hat mindestens ein Social-Media-Profil (LinkedIn/Facebook/Instagram/X/YouTube/TikTok) */
+  has_social?: boolean;
 }
 
 export interface SortOptions {
@@ -284,6 +291,16 @@ export interface SearchJob {
   query: string;
   location: string;
   country: string;
+  /** Optionale Stadt-Eingrenzung zusätzlich zu location. */
+  city: string | null;
+  /** Rechtsform-Filter (gmbh, ag, …) oder null für alle. */
+  company_type: string | null;
+  /** Pipeline-Skip-Flag: nur Leads mit Entscheider behalten. */
+  require_ceo: boolean;
+  /** Pipeline-Skip-Flag: nur Leads mit gültiger E-Mail behalten. */
+  require_email: boolean;
+  /** Pipeline-Skip-Flag: nur Leads mit Website behalten. */
+  require_website: boolean;
   status: SearchJobStatus;
   results_count: number;
   total_count: number | null;
@@ -295,10 +312,15 @@ export interface SearchJob {
   updated_at: string;
 }
 
-export type SearchJobInsert = Omit<SearchJob, "id" | "created_at" | "updated_at" | "started_at" | "completed_at" | "results_count" | "total_count" | "estimated_end_at" | "error_message" | "status"> & {
+export type SearchJobInsert = Omit<SearchJob, "id" | "created_at" | "updated_at" | "started_at" | "completed_at" | "results_count" | "total_count" | "estimated_end_at" | "error_message" | "status" | "city" | "company_type" | "require_ceo" | "require_email" | "require_website"> & {
   id?: string;
   status?: SearchJobStatus;
   radius_km?: number;
+  city?: string | null;
+  company_type?: string | null;
+  require_ceo?: boolean;
+  require_email?: boolean;
+  require_website?: boolean;
 };
 
 /* ── Länder-Mapping (ISO-Codes → Anzeigename) ── */

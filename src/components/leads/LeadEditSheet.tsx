@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -12,9 +12,10 @@ import {
   Share2,
   User,
   Mail,
-  Send,
   ChevronDown,
   ExternalLink,
+  Sparkles,
+  Loader2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -95,7 +96,6 @@ const SOCIAL_FIELDS = [
   { name: "social_linkedin",  label: "LinkedIn",    placeholder: "https://linkedin.com/company/..." },
   { name: "social_facebook",  label: "Facebook",    placeholder: "https://facebook.com/..." },
   { name: "social_instagram", label: "Instagram",   placeholder: "https://instagram.com/..." },
-  { name: "social_xing",      label: "Xing",        placeholder: "https://xing.com/companies/..." },
   { name: "social_twitter",   label: "Twitter / X", placeholder: "https://x.com/..." },
   { name: "social_youtube",   label: "YouTube",     placeholder: "https://youtube.com/@..." },
   { name: "social_tiktok",    label: "TikTok",      placeholder: "https://tiktok.com/@..." },
@@ -122,7 +122,6 @@ const editSchema = z.object({
   social_linkedin:    z.string().optional(),
   social_facebook:    z.string().optional(),
   social_instagram:   z.string().optional(),
-  social_xing:        z.string().optional(),
   social_twitter:     z.string().optional(),
   social_youtube:     z.string().optional(),
   social_tiktok:      z.string().optional(),
@@ -135,9 +134,12 @@ interface LeadEditSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
+  /** Create mode: wenn true und lead null, wird ein neuer Lead erstellt */
+  mode?: "edit" | "create";
 }
 
-export function LeadEditSheet({ lead, open, onOpenChange, onSaved }: LeadEditSheetProps) {
+export function LeadEditSheet({ lead, open, onOpenChange, onSaved, mode = "edit" }: LeadEditSheetProps) {
+  const isCreate = mode === "create" && !lead;
   const form = useForm<EditFormValues>({
     resolver: zodResolver(editSchema),
     defaultValues: {
@@ -146,12 +148,21 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved }: LeadEditShe
       phone: "", email: "", website: "",
       street: "", postal_code: "", city: "", country: "",
       social_linkedin: "", social_facebook: "", social_instagram: "",
-      social_xing: "", social_twitter: "", social_youtube: "", social_tiktok: "",
+      social_twitter: "", social_youtube: "", social_tiktok: "",
     },
   });
 
   useEffect(() => {
-    if (lead && open) {
+    if (isCreate && open) {
+      form.reset({
+        company: "", legal_form: "", industry: "", status: "new", notes: "",
+        ceo_gender: "", ceo_title: "", ceo_first_name: "", ceo_last_name: "", ceo_name: "",
+        phone: "", email: "", website: "",
+        street: "", postal_code: "", city: "", country: "",
+        social_linkedin: "", social_facebook: "", social_instagram: "",
+        social_twitter: "", social_youtube: "", social_tiktok: "",
+      });
+    } else if (lead && open) {
       form.reset({
         company:              lead.company ?? "",
         legal_form:           lead.legal_form ?? "",
@@ -178,12 +189,73 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved }: LeadEditShe
         social_tiktok:        lead.social_tiktok ?? "",
       });
     }
-  }, [lead, open, form]);
+  }, [lead, open, form, isCreate]);
 
   // Auto-generate ceo_name from parts
   const ceoTitle = form.watch("ceo_title");
   const ceoFirst = form.watch("ceo_first_name");
   const ceoLast  = form.watch("ceo_last_name");
+
+  /* Live-Favicon: Website-Feld beobachten und Preview sofort updaten — auch im
+   * Create-Modus, wenn lead noch null ist. CompanyFavicon kapselt Domain-Parse
+   * und Fallback selbst (Mindest-Plausibilität: enthält "."). */
+  const watchedWebsite = form.watch("website");
+
+  /* AI-Auto-Fill: nur leere Form-Felder werden vom Endpoint-Ergebnis überschrieben.
+   * So gehen Eingaben des Users nicht verloren. */
+  const [aiFilling, setAiFilling] = useState(false);
+
+  async function handleAiFill() {
+    const url = (form.getValues("website") ?? "").trim();
+    if (!url) {
+      toast.error("Bitte erst eine Website eingeben");
+      return;
+    }
+    setAiFilling(true);
+    try {
+      const res = await fetch("/api/leads/enrich-from-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url,
+          company: form.getValues("company") || undefined,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json.error ?? "AI-Auto-Fill fehlgeschlagen");
+        return;
+      }
+      const data = json.data as Record<string, string | null | undefined>;
+      const FILLABLE = [
+        "company", "industry", "legal_form",
+        "email", "phone",
+        "street", "postal_code", "city", "country",
+        "ceo_gender", "ceo_title", "ceo_first_name", "ceo_last_name", "ceo_name",
+        "social_linkedin", "social_facebook", "social_instagram",
+        "social_twitter", "social_youtube", "social_tiktok",
+      ] as const;
+      let filledCount = 0;
+      for (const key of FILLABLE) {
+        const next = data[key];
+        if (!next) continue;
+        const current = (form.getValues(key as keyof EditFormValues) ?? "").toString().trim();
+        if (current.length > 0) continue; // bereits ausgefüllt → nicht überschreiben
+        form.setValue(key as keyof EditFormValues, String(next), { shouldDirty: true });
+        filledCount++;
+      }
+      const pages = json.meta?.pages_loaded?.length ?? 0;
+      if (filledCount === 0) {
+        toast.info(`Keine neuen Felder gefunden (${pages} Seiten gescannt)`);
+      } else {
+        toast.success(`${filledCount} Felder vorausgefüllt (${pages} Seiten gescannt)`);
+      }
+    } catch {
+      toast.error("AI-Auto-Fill fehlgeschlagen");
+    } finally {
+      setAiFilling(false);
+    }
+  }
 
   useEffect(() => {
     const parts = [ceoTitle, ceoFirst, ceoLast].filter(Boolean);
@@ -193,50 +265,74 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved }: LeadEditShe
   }, [ceoTitle, ceoFirst, ceoLast, form]);
 
   async function onSubmit(values: EditFormValues) {
-    if (!lead) return;
+    const payload = {
+      company:              values.company,
+      legal_form:           values.legal_form || null,
+      industry:             values.industry || null,
+      status:               values.status as any,
+      notes:                values.notes || null,
+      ceo_gender:           values.ceo_gender || null,
+      ceo_title:            values.ceo_title || null,
+      ceo_first_name:       values.ceo_first_name || null,
+      ceo_last_name:        values.ceo_last_name || null,
+      ceo_name:             values.ceo_name || null,
+      phone:                values.phone || null,
+      email:                values.email || null,
+      website:              values.website || null,
+      street:               values.street || null,
+      postal_code:          values.postal_code || null,
+      city:                 values.city || null,
+      country:              values.country || null,
+      social_linkedin:      values.social_linkedin || null,
+      social_facebook:      values.social_facebook || null,
+      social_instagram:     values.social_instagram || null,
+      social_twitter:       values.social_twitter || null,
+      social_youtube:       values.social_youtube || null,
+      social_tiktok:        values.social_tiktok || null,
+    };
+
     try {
-      const res = await fetch(`/api/leads/${lead.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          company:              values.company,
-          legal_form:           values.legal_form || null,
-          industry:             values.industry || null,
-          status:               values.status,
-          notes:                values.notes || null,
-          ceo_gender:           values.ceo_gender || null,
-          ceo_title:            values.ceo_title || null,
-          ceo_first_name:       values.ceo_first_name || null,
-          ceo_last_name:        values.ceo_last_name || null,
-          ceo_name:             values.ceo_name || null,
-          phone:                values.phone || null,
-          email:                values.email || null,
-          website:              values.website || null,
-          street:               values.street || null,
-          postal_code:          values.postal_code || null,
-          city:                 values.city || null,
-          country:              values.country || null,
-          social_linkedin:      values.social_linkedin || null,
-          social_facebook:      values.social_facebook || null,
-          social_instagram:     values.social_instagram || null,
-          social_xing:          values.social_xing || null,
-          social_twitter:       values.social_twitter || null,
-          social_youtube:       values.social_youtube || null,
-          social_tiktok:        values.social_tiktok || null,
-        }),
-      });
-      if (!res.ok) throw new Error();
-      toast.success("Lead aktualisiert");
+      if (isCreate) {
+        const res = await fetch("/api/leads", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error();
+        toast.success("Lead erstellt");
+      } else {
+        if (!lead) return;
+        const res = await fetch(`/api/leads/${lead.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error();
+        toast.success("Lead aktualisiert");
+      }
       onOpenChange(false);
       onSaved();
     } catch {
-      toast.error("Fehler beim Speichern");
+      toast.error(isCreate ? "Fehler beim Erstellen" : "Fehler beim Speichern");
     }
   }
 
   const currentStatus = STATUS_OPTIONS.find((s) => s.value === form.watch("status"));
-  const cleanWeb = lead?.website?.replace(/^https?:\/\//, "").replace(/\/$/, "") ?? null;
-  const stateLabel = lead?.state ? (STATE_LABELS[lead.state] ?? lead.state) : null;
+
+  /* Live-Preview im Header: Title + Subtitle (Branche · Website · Stadt) folgen
+   * dem Form-State, damit der User sofort sieht, was er gerade eingibt. lead?.*
+   * dient nur als Fallback im Edit-Modus, falls Felder noch nicht initialisiert. */
+  const watchedCompany  = form.watch("company");
+  const watchedIndustry = form.watch("industry");
+  const watchedCity     = form.watch("city");
+  const watchedCountry  = form.watch("country");
+  const displayCompany  = (watchedCompany ?? "").trim() || (isCreate ? "Neuer Lead" : (lead?.company ?? "Lead bearbeiten"));
+  const displayWebsite  = (watchedWebsite ?? "").trim() || lead?.website || "";
+  const cleanWeb        = displayWebsite ? displayWebsite.replace(/^https?:\/\//, "").replace(/\/$/, "") : null;
+  const displayIndustry = (watchedIndustry ?? "").trim() || lead?.industry || null;
+  const displayCity     = (watchedCity ?? "").trim() || lead?.city || null;
+  const displayCountry  = (watchedCountry ?? "").trim() || lead?.country || null;
+  const stateLabel      = lead?.state ? (STATE_LABELS[lead.state] ?? lead.state) : null;
 
   async function handleStatusChange(newStatus: LeadStatus) {
     if (!lead) return;
@@ -262,19 +358,19 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved }: LeadEditShe
         {/* Header — v3 style */}
         <SheetHeader className="px-5 pt-4 pb-4 border-b border-border shrink-0">
           <div className="flex items-start gap-3.5">
-            <CompanyFavicon website={lead?.website ?? null} size={10} />
+            <CompanyFavicon website={watchedWebsite || lead?.website || null} size={10} />
             <div className="min-w-0 flex-1 space-y-1">
-              <SheetTitle className="text-[17px] font-semibold tracking-tight truncate leading-tight">
-                {lead?.company ?? "Lead bearbeiten"}
+              <SheetTitle className="text-[17px] font-medium tracking-tight truncate leading-tight">
+                {displayCompany}
               </SheetTitle>
               <SheetDescription asChild>
                 <div className="flex items-center gap-2 flex-wrap text-[12.5px] text-muted-foreground">
-                  {lead?.industry && <span>{lead.industry}</span>}
+                  {displayIndustry && <span>{displayIndustry}</span>}
                   {cleanWeb && (
                     <>
-                      {lead?.industry && <span className="opacity-60">·</span>}
+                      {displayIndustry && <span className="opacity-60">·</span>}
                       <a
-                        href={lead?.website?.startsWith("http") ? lead.website : `https://${cleanWeb}`}
+                        href={displayWebsite.startsWith("http") ? displayWebsite : `https://${cleanWeb}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-0.5 hover:text-primary"
@@ -284,17 +380,20 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved }: LeadEditShe
                       </a>
                     </>
                   )}
-                  {lead?.city && (
+                  {displayCity && (
                     <>
-                      <span className="opacity-60">·</span>
-                      <span>{lead.city}{stateLabel ? `, ${stateLabel}` : ""}</span>
+                      {(displayIndustry || cleanWeb) && <span className="opacity-60">·</span>}
+                      <span>
+                        {displayCity}
+                        {stateLabel ? `, ${stateLabel}` : displayCountry ? `, ${displayCountry}` : ""}
+                      </span>
                     </>
                   )}
                 </div>
               </SheetDescription>
             </div>
             {currentStatus && (
-              <span className={cn("badge-status shrink-0", STATUS_BADGE_CLASS[currentStatus.value])}>
+              <span className={cn("badge-status shrink-0 mr-7", STATUS_BADGE_CLASS[currentStatus.value])}>
                 <span className="dot" />
                 {currentStatus.label}
               </span>
@@ -320,10 +419,6 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved }: LeadEditShe
               </a>
             </Button>
           )}
-          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs font-medium" disabled>
-            <Send className="h-3.5 w-3.5" strokeWidth={1.75} />
-            Zu Kampagne
-          </Button>
           <div className="ml-auto">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -602,7 +697,24 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved }: LeadEditShe
                     name="website"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="text-xs text-muted-foreground">Website</FormLabel>
+                        <div className="flex items-center justify-between gap-2">
+                          <FormLabel className="text-xs text-muted-foreground">Website</FormLabel>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 text-[11px] gap-1 text-primary hover:text-primary hover:bg-primary/5 -my-1"
+                            onClick={handleAiFill}
+                            disabled={aiFilling || !((field.value ?? "").trim())}
+                          >
+                            {aiFilling ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <Sparkles className="h-3 w-3" strokeWidth={1.75} />
+                            )}
+                            {aiFilling ? "Sucht …" : "Mit AI ausfüllen"}
+                          </Button>
+                        </div>
                         <FormControl>
                           <Input className="h-9" placeholder="https://" {...field} />
                         </FormControl>
@@ -730,7 +842,7 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved }: LeadEditShe
                 {form.formState.isSubmitting && (
                   <Spinner className="h-4 w-4 mr-2" />
                 )}
-                Speichern
+                {isCreate ? "Erstellen" : "Speichern"}
               </Button>
             </SheetFooter>
 

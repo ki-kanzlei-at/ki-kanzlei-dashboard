@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { toast } from "sonner";
-import { X, Trash2, Pencil, ChevronDown, CheckSquare, Sparkles, Download, Loader2, Globe } from "lucide-react";
+import { X, Trash2, Pencil, ChevronDown, CheckSquare, Sparkles, Download, Loader2, Globe, FileSpreadsheet, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -238,14 +238,14 @@ export function LeadSelectionBar({
               className="text-xs gap-2 cursor-pointer"
               onClick={() => onExport("xlsx")}
             >
-              <Download className="h-3 w-3 text-primary" />
+              <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />
               Excel (.xlsx)
             </DropdownMenuItem>
             <DropdownMenuItem
               className="text-xs gap-2 cursor-pointer"
               onClick={() => onExport("csv")}
             >
-              <Download className="h-3 w-3 text-primary" />
+              <FileText className="h-3.5 w-3.5 text-sky-600" />
               CSV (.csv)
             </DropdownMenuItem>
 
