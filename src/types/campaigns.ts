@@ -3,6 +3,11 @@
 export type CampaignStatus = "draft" | "active" | "paused" | "completed";
 export type CampaignLeadStatus = "pending" | "sent" | "failed" | "opened" | "bounced" | "replied";
 
+/* Aktivitätstyp für die "Letzte Aktivität"-Spalte.
+ * Backend kann diesen Wert später aus dem letzten campaign_lead-Event ableiten. */
+export type CampaignActivityKind =
+  | "reply" | "open" | "send" | "pause" | "completed" | "draft";
+
 export interface Campaign {
   id: string;
   user_id: string;
@@ -22,6 +27,15 @@ export interface Campaign {
   started_at: string | null;
   completed_at: string | null;
   error_message: string | null;
+
+  /* Backend-optionale Felder (UI-ready, später vom API zu liefern) */
+  goal?: string | null;
+  steps?: number | null;
+  sender_name?: string | null;
+  sender_email?: string | null;
+  conversion_count?: number | null;
+  last_activity_at?: string | null;
+  last_activity_kind?: CampaignActivityKind | null;
 }
 
 export type CampaignInsert = Pick<Campaign, "name" | "daily_limit" | "delay_minutes" | "reply_to"> & {

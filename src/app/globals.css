@@ -120,6 +120,130 @@ body {
 }
 .filter-trigger .x-btn:hover { background: var(--muted); color: var(--foreground); }
 
+/* ══════════════════════════════════════════════════════════════
+   Campaigns (v3) — extends Leads v3 design language
+   ══════════════════════════════════════════════════════════════ */
+
+/* Campaign status badges (reuse .badge-status base from above) */
+.status-active    { background: color-mix(in oklch, oklch(0.62 0.18 150) 10%, var(--card)); color: color-mix(in oklch, oklch(0.62 0.18 150) 65%, black); border-color: color-mix(in oklch, oklch(0.62 0.18 150) 22%, var(--card)); }
+.status-active    .dot { background: oklch(0.62 0.18 150); }
+.status-paused    { background: color-mix(in oklch, oklch(0.72 0.16 75) 12%, var(--card)); color: color-mix(in oklch, oklch(0.72 0.16 75) 55%, black); border-color: color-mix(in oklch, oklch(0.72 0.16 75) 24%, var(--card)); }
+.status-paused    .dot { background: oklch(0.72 0.16 75); }
+.status-draft     { background: var(--muted); color: var(--muted-foreground); border-color: var(--border); }
+.status-draft     .dot { background: var(--muted-foreground); opacity: 0.6; }
+.status-completed { background: color-mix(in oklch, var(--primary) 8%, var(--card)); color: color-mix(in oklch, var(--primary) 80%, black); border-color: color-mix(in oklch, var(--primary) 18%, var(--card)); }
+.status-completed .dot { background: var(--primary); }
+.status-archived  { background: var(--muted); color: var(--muted-foreground); border-color: var(--border); }
+.status-archived  .dot { background: var(--muted-foreground); opacity: 0.4; }
+
+/* Mini progress (sent X/Y) */
+.cmp-progress { display: inline-flex; align-items: center; gap: 9px; min-width: 110px; }
+.cmp-progress-track { width: 60px; height: 4px; border-radius: 99px; background: var(--muted); overflow: hidden; flex: 0 0 60px; }
+.cmp-progress-fill { height: 100%; background: var(--primary); border-radius: 99px; }
+.cmp-progress-val { font-size: 13px; font-weight: 500; color: var(--foreground); }
+.cmp-progress-val .meta { color: var(--muted-foreground); font-weight: 400; margin-left: 3px; }
+
+/* Rate cells */
+.rate { display: inline-flex; align-items: baseline; gap: 4px; font-size: 13px; font-weight: 500; }
+.rate .pct { font-weight: 600; }
+.rate-hi  .pct { color: oklch(0.40 0.15 150); }
+.rate-mid .pct { color: var(--primary); }
+.rate-low .pct { color: oklch(0.45 0.14 75); }
+.rate-vlo .pct { color: var(--muted-foreground); font-weight: 500; }
+.rate .delta { font-size: 11px; color: var(--muted-foreground); font-weight: 400; }
+.rate .delta.up   { color: oklch(0.50 0.16 150); }
+.rate .delta.down { color: oklch(0.55 0.20 25); }
+
+/* Campaign meta row beneath name */
+.cmp-meta-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11.5px; color: var(--muted-foreground);
+  margin-top: 3px;
+}
+.cmp-meta-row .sep { width: 3px; height: 3px; border-radius: 50%; background: var(--muted-foreground); opacity: 0.5; }
+
+/* Activity (last) — reused styles, but slim variant */
+.activity { display: flex; flex-direction: column; line-height: 1.25; gap: 2px; }
+.activity-when { font-size: 12.5px; color: var(--foreground); }
+.activity-when.is-stale { color: var(--muted-foreground); }
+.activity-what { font-size: 11px; color: var(--muted-foreground); }
+
+/* Performance cards in detail sheet */
+.perf-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.perf-card {
+  padding: 14px 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.perf-card-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  margin-bottom: 6px;
+}
+.perf-card-value {
+  font-size: 22px; font-weight: 600;
+  letter-spacing: -0.02em; line-height: 1.1;
+  color: var(--foreground);
+}
+.perf-card-meta { font-size: 11.5px; color: var(--muted-foreground); margin-top: 4px; }
+.perf-card-meta .delta { font-weight: 500; }
+.perf-card-meta .delta.up   { color: oklch(0.45 0.16 150); }
+.perf-card-meta .delta.down { color: oklch(0.55 0.20 25); }
+
+/* Funnel viz */
+.funnel { display: flex; flex-direction: column; gap: 6px; }
+.funnel-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 84px;
+  align-items: center;
+  gap: 12px;
+}
+.funnel-label { font-size: 12.5px; color: var(--muted-foreground); }
+.funnel-bar {
+  height: 22px;
+  background: color-mix(in oklch, var(--primary) 10%, var(--card));
+  border-radius: 4px;
+  position: relative; overflow: hidden;
+}
+.funnel-bar-fill {
+  position: absolute; inset: 0 auto 0 0;
+  background: var(--primary);
+  border-radius: 4px;
+}
+.funnel-val { font-size: 12.5px; font-weight: 500; text-align: right; }
+.funnel-val .pct { color: var(--muted-foreground); font-weight: 400; font-size: 11.5px; margin-left: 4px; }
+
+/* Sequence step compact */
+.seq-compact { display: flex; flex-direction: column; gap: 10px; }
+.seq-compact-row { display: grid; grid-template-columns: 36px 1fr; gap: 12px; align-items: stretch; }
+.seq-compact-num { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.seq-compact-num .bubble {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--accent); color: var(--primary);
+  display: grid; place-items: center;
+  font-size: 12px; font-weight: 600;
+}
+.seq-compact-num .line { flex: 1; width: 1px; background: var(--border); margin: 2px 0; }
+.seq-compact-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px 14px;
+}
+.seq-compact-card .subject { font-size: 13px; font-weight: 500; margin-bottom: 4px; }
+.seq-compact-card .stats {
+  display: flex; gap: 16px; margin-top: 8px;
+  font-size: 11.5px; color: var(--muted-foreground);
+}
+.seq-compact-card .stats b { color: var(--foreground); font-weight: 600; }
+
 /* ── Detail sheet helpers (Übersicht cards) ── */
 .detail-card {
   background: color-mix(in oklch, var(--muted) 40%, var(--card));

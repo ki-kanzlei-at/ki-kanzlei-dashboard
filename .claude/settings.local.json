@@ -96,7 +96,8 @@
       "WebFetch(domain:docs.dataforseo.com)",
       "WebFetch(domain:www.codeconcisely.com)",
       "Bash(npm ls:*)",
-      "WebFetch(domain:help.lemlist.com)"
+      "WebFetch(domain:help.lemlist.com)",
+      "Bash(npx tsx *)"
     ]
   },
   "enableAllProjectMcpServers": true,
