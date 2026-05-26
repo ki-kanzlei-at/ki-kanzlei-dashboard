@@ -1,11 +1,12 @@
 /* ── API Route: POST /api/linkedin/analyze ── */
-/* 1. Loads full LinkedIn profile via Unipile → fills all available fields directly
+/* 1. Loads full LinkedIn profile via ConnectSafely → fills all available fields directly
    2. Calls Gemini only for relevance score + industry (if missing) */
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getUserSettings } from "@/lib/supabase/settings";
-import { createUnipileClient } from "@/lib/unipile/client";
+import { getUserSettings, getLinkedInIntegration } from "@/lib/supabase/settings";
+import { createConnectSafelyClient } from "@/lib/connectsafely/client";
+import { enforceQuota, logAction } from "@/lib/connectsafely/rate-limit";
 import { getLinkedInLead, updateLinkedInLead } from "@/lib/supabase/linkedin-leads";
 import type { LinkedInLeadUpdate } from "@/types/linkedin";
 
@@ -18,8 +19,9 @@ export async function POST(request: NextRequest) {
     }
 
     const settings = await getUserSettings(user.id);
-    if (!settings?.unipile_dsn || !settings?.unipile_api_key || !settings?.unipile_account_id) {
-      return NextResponse.json({ error: "Unipile nicht konfiguriert" }, { status: 400 });
+    const integration = getLinkedInIntegration(settings);
+    if (!integration) {
+      return NextResponse.json({ error: "LinkedIn-Integration nicht konfiguriert" }, { status: 400 });
     }
     if (!settings?.gemini_api_key) {
       return NextResponse.json({ error: "Gemini API Key nicht konfiguriert" }, { status: 400 });
@@ -35,12 +37,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Lead nicht gefunden" }, { status: 404 });
     }
 
-    // ── Step 1: Load full profile from Unipile ──
-    const client = createUnipileClient(settings.unipile_dsn, settings.unipile_api_key);
+    // Profile-Lookup Quota prüfen (cached responses zählen nicht — wir loggen
+    // konservativ, da wir den cached-Flag im LegacyProfile-Mapping verlieren)
+    try {
+      await enforceQuota(user.id, "profilePerDay");
+    } catch (e) {
+      const err = e as Error & { status?: number; resetAt?: string };
+      return NextResponse.json(
+        { error: err.message, resetAt: err.resetAt },
+        { status: err.status ?? 429 },
+      );
+    }
+
+    // ── Step 1: Load full profile from ConnectSafely ──
+    const client = createConnectSafelyClient(integration.apiKey, integration.accountId);
     const identifier = lead.linkedin_id || lead.linkedin_url;
     let profile;
     try {
-      profile = await client.getProfile(settings.unipile_account_id, identifier);
+      profile = await client.getProfile(integration.accountId, identifier);
+      logAction(user.id, "profilePerDay", { leadId, identifier }).catch(() => {});
     } catch {
       profile = null;
     }

@@ -1,9 +1,13 @@
-/* ── API Route: POST /api/linkedin/send-invitations ── */
+/* ── API Route: POST /api/linkedin/send-invitations ──
+ * Sendet Connection-Requests via ConnectSafely.
+ * HARTES LIMIT: 90/Woche pro Account → Überschreitung = 24h Hold.
+ * Wir nutzen Soft-Cap 80/Woche + per-Call Random-Delay 2-5s. */
 
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getUserSettings } from "@/lib/supabase/settings";
-import { createUnipileClient } from "@/lib/unipile/client";
+import { getUserSettings, getLinkedInIntegration } from "@/lib/supabase/settings";
+import { createConnectSafelyClient, ConnectSafelyError } from "@/lib/connectsafely/client";
+import { enforceQuota, getQuota } from "@/lib/connectsafely/rate-limit";
 import {
   getLinkedInLeadsForOutreach,
   updateLinkedInLeadStatus,
@@ -24,29 +28,57 @@ export async function POST() {
     }
 
     const settings = await getUserSettings(user.id);
-    if (!settings?.unipile_dsn || !settings?.unipile_api_key || !settings?.unipile_account_id) {
+    const integration = getLinkedInIntegration(settings);
+    if (!integration) {
       return NextResponse.json(
-        { error: "Unipile nicht konfiguriert" },
+        { error: "LinkedIn-Integration nicht konfiguriert" },
         { status: 400 },
       );
     }
 
-    const dailyLimit = settings.linkedin_daily_limit ?? 25;
-    const leads = await getLinkedInLeadsForOutreach(user.id, dailyLimit);
+    // Quota-Guard: stoppt sofort wenn Wochen-Limit erreicht
+    try {
+      await enforceQuota(user.id, "connectPerWeek");
+    } catch (e) {
+      const err = e as Error & { status?: number; resetAt?: string };
+      return NextResponse.json(
+        { error: err.message, resetAt: err.resetAt },
+        { status: err.status ?? 429 },
+      );
+    }
 
+    // Tagesziel: kleiner von User-Setting und Rest-Wochenkontingent
+    const userDailyLimit = settings?.linkedin_daily_limit ?? 15;
+    const quota = await getQuota(user.id, "connectPerWeek");
+    const effectiveLimit = Math.min(userDailyLimit, quota.remaining);
+
+    if (effectiveLimit <= 0) {
+      return NextResponse.json({
+        data: { sent: 0, message: "Wochenlimit für Einladungen erreicht", resetAt: quota.resetAt },
+      });
+    }
+
+    const leads = await getLinkedInLeadsForOutreach(user.id, effectiveLimit);
     if (leads.length === 0) {
       return NextResponse.json({ data: { sent: 0, message: "Keine Leads in der Queue" } });
     }
 
-    const client = createUnipileClient(settings.unipile_dsn, settings.unipile_api_key);
+    const client = createConnectSafelyClient(integration.apiKey, integration.accountId);
     let sent = 0;
     const errors: string[] = [];
 
     for (const lead of leads) {
       try {
+        // Re-Check Quota vor jedem Call (parallele Cron-Läufe könnten reinfunken)
+        const currentQuota = await getQuota(user.id, "connectPerWeek");
+        if (currentQuota.shouldBlock) {
+          errors.push("Wochenlimit erreicht — Stopp.");
+          break;
+        }
+
         const identifier = lead.linkedin_id || lead.linkedin_url;
         await client.sendInvitation(
-          settings.unipile_account_id,
+          integration.accountId,
           identifier,
           lead.invite_message || undefined,
         );
@@ -56,16 +88,14 @@ export async function POST() {
         });
         sent++;
 
-        // Random delay 2-5 seconds between invitations
-        if (sent < leads.length) {
-          await randomDelay(2000, 5000);
-        }
+        // 2-5s Pause damit LinkedIn das nicht als Bot-Signal sieht
+        if (sent < leads.length) await randomDelay(2000, 5000);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unbekannter Fehler";
-        const status = (err as { status?: number }).status;
+        const status = (err as ConnectSafelyError).status;
 
-        // 422 = LinkedIn weekly limit reached → stop immediately
-        if (status === 422) {
+        // 429 von ConnectSafely → hartes Limit erreicht, sofort stoppen
+        if (status === 429 || status === 422) {
           await updateLinkedInLeadStatus(lead.id, "error", {
             error_message: "LinkedIn-Einladungslimit erreicht",
           });
@@ -73,9 +103,7 @@ export async function POST() {
           break;
         }
 
-        await updateLinkedInLeadStatus(lead.id, "error", {
-          error_message: message,
-        });
+        await updateLinkedInLeadStatus(lead.id, "error", { error_message: message });
         errors.push(`${lead.full_name}: ${message}`);
       }
     }

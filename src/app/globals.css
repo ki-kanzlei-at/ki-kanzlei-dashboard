@@ -58,9 +58,9 @@ body {
 .score-track { width: 44px; height: 4px; border-radius: 99px; background: var(--muted); overflow: hidden; flex: 0 0 44px; }
 .score-fill { height: 100%; border-radius: 99px; }
 .score-val { font-weight: 500; font-size: 13px; font-family: inherit; }
-.score-hi  .score-fill { background: oklch(0.62 0.18 150); } .score-hi  .score-val { color: oklch(0.40 0.15 150); }
+.score-hi  .score-fill { background: var(--success); } .score-hi  .score-val { color: oklch(0.40 0.15 150); }
 .score-mid .score-fill { background: var(--primary); }       .score-mid .score-val { color: var(--primary); }
-.score-low .score-fill { background: oklch(0.72 0.16 75);  } .score-low .score-val { color: oklch(0.45 0.14 75); }
+.score-low .score-fill { background: var(--warning);  } .score-low .score-val { color: oklch(0.45 0.14 75); }
 .score-vlo .score-fill { background: var(--muted-foreground); } .score-vlo .score-val { color: var(--muted-foreground); }
 
 /* ── Status badge — KI Kanzlei Brand-Palette (Tailwind sky/blue/primary/indigo) ── */
@@ -125,10 +125,10 @@ body {
    ══════════════════════════════════════════════════════════════ */
 
 /* Campaign status badges (reuse .badge-status base from above) */
-.status-active    { background: color-mix(in oklch, oklch(0.62 0.18 150) 10%, var(--card)); color: color-mix(in oklch, oklch(0.62 0.18 150) 65%, black); border-color: color-mix(in oklch, oklch(0.62 0.18 150) 22%, var(--card)); }
-.status-active    .dot { background: oklch(0.62 0.18 150); }
-.status-paused    { background: color-mix(in oklch, oklch(0.72 0.16 75) 12%, var(--card)); color: color-mix(in oklch, oklch(0.72 0.16 75) 55%, black); border-color: color-mix(in oklch, oklch(0.72 0.16 75) 24%, var(--card)); }
-.status-paused    .dot { background: oklch(0.72 0.16 75); }
+.status-active    { background: color-mix(in oklch, var(--success) 10%, var(--card)); color: color-mix(in oklch, var(--success) 65%, black); border-color: color-mix(in oklch, var(--success) 22%, var(--card)); }
+.status-active    .dot { background: var(--success); }
+.status-paused    { background: color-mix(in oklch, var(--warning) 12%, var(--card)); color: color-mix(in oklch, var(--warning) 55%, black); border-color: color-mix(in oklch, var(--warning) 24%, var(--card)); }
+.status-paused    .dot { background: var(--warning); }
 .status-draft     { background: var(--muted); color: var(--muted-foreground); border-color: var(--border); }
 .status-draft     .dot { background: var(--muted-foreground); opacity: 0.6; }
 .status-completed { background: color-mix(in oklch, var(--primary) 8%, var(--card)); color: color-mix(in oklch, var(--primary) 80%, black); border-color: color-mix(in oklch, var(--primary) 18%, var(--card)); }
@@ -300,6 +300,656 @@ body {
 .timeline-what { font-size: 13px; color: var(--foreground); font-weight: 500; }
 .timeline-detail { font-size: 12.5px; color: var(--muted-foreground); margin-top: 2px; }
 
+/* ══════════════════════════════════════════════════════════════
+   LinkedIn (v3) — extends Leads v3 design language
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Connected profile card (top of page) ─────────────────────────────── */
+.li-profile-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  gap: 18px;
+  align-items: center;
+  padding: 18px 22px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.li-profile-card::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0;
+  width: 4px; height: 100%;
+  background: linear-gradient(180deg, var(--info) 0%, oklch(0.55 0.22 250) 100%);
+}
+.li-profile-avatar {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--info), oklch(0.55 0.22 250));
+  color: #fff;
+  display: grid; place-items: center;
+  font-size: 22px; font-weight: 600;
+  flex: 0 0 64px;
+  overflow: hidden;
+}
+.li-profile-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.li-profile-info { min-width: 0; }
+.li-profile-name { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; display: inline-flex; align-items: center; gap: 8px; }
+.li-profile-headline { font-size: 13px; color: var(--muted-foreground); margin-top: 2px; line-height: 1.4; }
+.li-profile-meta {
+  display: flex; gap: 14px; flex-wrap: wrap;
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+}
+.li-profile-meta .item { display: inline-flex; align-items: center; gap: 5px; }
+.li-profile-meta b { color: var(--foreground); font-weight: 600; }
+.li-profile-meta .sep { width: 3px; height: 3px; border-radius: 50%; background: var(--muted-foreground); opacity: 0.5; }
+
+.li-profile-actions { display: flex; gap: 8px; align-items: center; }
+
+.li-connect-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 99px;
+  background: color-mix(in oklch, var(--success) 10%, var(--card));
+  color: color-mix(in oklch, var(--success) 62%, black);
+  border: 1px solid color-mix(in oklch, var(--success) 22%, var(--card));
+}
+.li-connect-badge .dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+/* ── Daily / pipeline limits strip ────────────────────────────────────── */
+.li-limits {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.li-limit-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.li-limit-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
+}
+.li-limit-title {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--foreground);
+}
+.li-limit-sub {
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+}
+.li-limit-bar {
+  height: 6px;
+  background: var(--muted);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.li-limit-bar-fill {
+  height: 100%;
+  background: var(--info);
+  border-radius: 99px;
+  transition: width .25s ease;
+}
+.li-limit-bar-fill.is-near    { background: var(--warning); }
+.li-limit-bar-fill.is-success { background: var(--success); }
+.li-limit-meta {
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+  margin-top: 6px;
+  display: flex; justify-content: space-between;
+}
+.li-limit-meta b { color: var(--foreground); font-weight: 600; }
+
+/* ── Degree-Badges (1st/2nd/3rd) ──────────────────────────────────────── */
+.li-degree {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 26px; height: 22px; padding: 0 6px;
+  border-radius: 99px;
+  font-size: 10px; font-weight: 600; line-height: 1;
+}
+.li-degree-1 { background: var(--info); color: #fff; }
+.li-degree-2 {
+  background: color-mix(in oklch, var(--info) 15%, var(--card));
+  color: var(--info);
+  border: 1px solid color-mix(in oklch, var(--info) 25%, var(--card));
+}
+.li-degree-3 {
+  background: var(--muted); color: var(--muted-foreground);
+  border: 1px solid var(--border);
+}
+
+/* ── Detail Sheet: LinkedIn profile preview ───────────────────────────── */
+.li-sheet-profile {
+  padding: 18px 22px;
+  background: linear-gradient(180deg, color-mix(in oklch, var(--info) 5%, var(--card)) 0%, var(--card) 100%);
+  border-bottom: 1px solid var(--border);
+}
+.li-sheet-photo-row { display: flex; align-items: flex-start; gap: 14px; }
+.li-sheet-photo {
+  width: 72px; height: 72px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--info), oklch(0.55 0.22 250));
+  color: #fff;
+  display: grid; place-items: center;
+  font-size: 24px; font-weight: 600;
+  flex: 0 0 72px;
+  border: 3px solid var(--card);
+  box-shadow: 0 0 0 1px var(--border);
+  overflow: hidden;
+}
+.li-sheet-photo img { width: 100%; height: 100%; object-fit: cover; }
+.li-sheet-info { flex: 1; min-width: 0; }
+.li-sheet-name {
+  font-size: 18px; font-weight: 600;
+  letter-spacing: -0.015em;
+  margin: 0 0 3px;
+  display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap;
+}
+.li-sheet-headline { font-size: 13px; color: var(--muted-foreground); line-height: 1.45; margin-bottom: 8px; }
+.li-sheet-meta { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11.5px; color: var(--muted-foreground); align-items: center; }
+.li-sheet-meta .item { display: inline-flex; align-items: center; gap: 4px; }
+.li-sheet-meta a { color: var(--info); font-weight: 500; display: inline-flex; align-items: center; gap: 3px; }
+.li-sheet-meta a:hover { text-decoration: underline; }
+
+/* Section titles inside sheet */
+.li-section-title {
+  font-size: 11.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--muted-foreground);
+  margin: 22px 0 10px;
+  display: flex; align-items: center; gap: 8px;
+}
+.li-section-title:first-child { margin-top: 0; }
+.li-section-title .line { flex: 1; height: 1px; background: var(--border); }
+
+/* Experience / Education rows */
+.li-exp-row {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.li-exp-row:last-child { border-bottom: 0; }
+.li-exp-logo {
+  width: 36px; height: 36px;
+  border-radius: 7px;
+  background: var(--muted);
+  display: grid; place-items: center;
+  color: var(--muted-foreground);
+  font-weight: 600; font-size: 13px;
+  flex: 0 0 36px;
+}
+.li-exp-pos { font-size: 13.5px; font-weight: 500; }
+.li-exp-co { font-size: 12.5px; color: var(--muted-foreground); margin-top: 1px; }
+.li-exp-time { font-size: 11.5px; color: var(--muted-foreground); margin-top: 3px; }
+
+/* Message thread bubbles */
+.li-thread { display: flex; flex-direction: column; gap: 10px; }
+.li-msg {
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.li-msg-time {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  margin-top: 3px;
+}
+.li-msg-out {
+  align-self: flex-end;
+  background: var(--info);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.li-msg-out + .li-msg-time { align-self: flex-end; }
+.li-msg-in {
+  align-self: flex-start;
+  background: var(--muted);
+  color: var(--foreground);
+  border-bottom-left-radius: 4px;
+}
+.li-msg-in + .li-msg-time { align-self: flex-start; }
+
+/* ── Responsive ───────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .li-profile-card { grid-template-columns: 1fr; }
+  .li-profile-actions { justify-content: flex-start; flex-wrap: wrap; }
+  .li-limits { grid-template-columns: 1fr; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Dashboard (v3) — extends Leads v3 design language
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Greeting ─────────────────────────────────────────────────────────── */
+.dash-greeting {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 24px;
+}
+.dash-greeting h1 {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  margin: 0 0 4px;
+  line-height: 1.15;
+}
+.dash-greeting .sub {
+  font-size: 13.5px;
+  color: var(--muted-foreground);
+  margin: 0;
+}
+.dash-greeting-actions { display: flex; gap: 8px; align-items: center; }
+
+/* ── Onboarding nudge ─────────────────────────────────────────────────── */
+.onb-nudge {
+  display: flex; align-items: center; gap: 16px;
+  padding: 14px 20px;
+  background: color-mix(in oklch, var(--primary) 4%, var(--card));
+  border: 1px solid color-mix(in oklch, var(--primary) 18%, var(--card));
+  border-radius: 10px;
+}
+.onb-nudge .nudge-icon {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--primary);
+  display: grid; place-items: center;
+  flex: 0 0 36px;
+}
+.onb-nudge-info { flex: 1; min-width: 0; }
+.onb-nudge-title { font-size: 13.5px; font-weight: 600; }
+.onb-nudge-desc { font-size: 12.5px; color: var(--muted-foreground); margin-top: 2px; }
+.onb-nudge-progress {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 12px; color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.onb-nudge-progress .bar {
+  width: 80px; height: 4px;
+  background: color-mix(in oklch, var(--primary) 14%, var(--card));
+  border-radius: 99px; overflow: hidden;
+}
+.onb-nudge-progress .bar-fill { height: 100%; background: var(--primary); border-radius: 99px; }
+
+/* ── KPI strip ────────────────────────────────────────────────────────── */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.kpi-card {
+  padding: 18px 20px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.kpi-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  letter-spacing: -0.005em;
+}
+.kpi-value {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  margin: 8px 0 6px;
+  line-height: 1.05;
+}
+.kpi-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px;
+}
+.kpi-delta {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-weight: 600;
+}
+.kpi-delta-up   { color: oklch(0.45 0.16 150); }
+.kpi-delta-down { color: var(--destructive); }
+.kpi-delta-flat { color: var(--muted-foreground); }
+.kpi-sub { color: var(--muted-foreground); }
+
+/* ── Grid for cards ───────────────────────────────────────────────────── */
+.dash-grid { display: grid; gap: 16px; }
+.dash-grid-2-1 { grid-template-columns: 2fr 1fr; }
+.dash-grid-1-1 { grid-template-columns: 1fr 1fr; }
+.dash-grid-3   { grid-template-columns: repeat(3, 1fr); }
+
+/* ── Section card ─────────────────────────────────────────────────────── */
+.section-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.section-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+.section-card-head h3 {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  margin: 0;
+}
+.section-card-head p {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  margin: 2px 0 0;
+}
+.section-card-body { padding: 16px 20px; }
+
+/* Segmented mini control */
+.seg-mini {
+  display: inline-flex;
+  background: var(--muted);
+  border-radius: 6px;
+  padding: 2px;
+  height: 28px;
+}
+.seg-mini button {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 4px;
+  color: var(--muted-foreground);
+  transition: all .12s ease;
+  cursor: pointer;
+}
+.seg-mini button:hover { color: var(--foreground); }
+.seg-mini button.is-active {
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+/* ── Chart ────────────────────────────────────────────────────────────── */
+.chart-svg { display: block; width: 100%; height: 240px; }
+.chart-svg .grid line { stroke: var(--border); stroke-dasharray: 2 4; }
+.chart-svg .axis text { font-size: 10.5px; fill: var(--muted-foreground); }
+.chart-svg .area-primary { fill: color-mix(in oklch, var(--primary) 10%, transparent); }
+.chart-svg .line-primary { fill: none; stroke: var(--primary); stroke-width: 2; }
+.chart-svg .line-success { fill: none; stroke: var(--success); stroke-width: 2; }
+.chart-svg .line-muted { fill: none; stroke: var(--muted-foreground); stroke-width: 1.25; stroke-dasharray: 3 3; opacity: 0.6; }
+.chart-svg .axis-label { font-size: 10px; fill: var(--muted-foreground); font-weight: 500; }
+
+.chart-legend {
+  display: flex; gap: 16px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  margin-top: 4px;
+}
+.chart-legend .item { display: inline-flex; align-items: center; gap: 6px; }
+.chart-legend .swatch { width: 10px; height: 10px; border-radius: 2px; }
+
+/* ── Funnel ────────────────────────────────────────────────────────────── */
+.funnel-list { display: flex; flex-direction: column; gap: 10px; }
+.funnel-stage {
+  display: grid;
+  grid-template-columns: 120px 1fr 90px;
+  align-items: center;
+  gap: 12px;
+}
+.funnel-stage .label { font-size: 12.5px; color: var(--foreground); font-weight: 500; }
+.funnel-stage .bar {
+  height: 24px;
+  background: var(--muted);
+  border-radius: 5px;
+  overflow: hidden;
+  position: relative;
+}
+.funnel-stage .bar-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 5px;
+  display: flex; align-items: center;
+  padding: 0 10px;
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 500;
+  transition: width .25s ease;
+  white-space: nowrap;
+}
+.funnel-stage .bar-fill.is-success { background: var(--success); }
+.funnel-stage .val {
+  text-align: right;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.funnel-stage .val .pct {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 400;
+  margin-top: 1px;
+}
+
+/* ── Activity feed ────────────────────────────────────────────────────── */
+.feed { display: flex; flex-direction: column; }
+.feed-row {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border);
+}
+.feed-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.feed-row:first-child { padding-top: 0; }
+.feed-icon {
+  width: 30px; height: 30px;
+  flex: 0 0 30px;
+  border-radius: 7px;
+  display: grid; place-items: center;
+}
+.feed-icon-reply { background: color-mix(in oklch, var(--success) 12%, var(--card)); color: oklch(0.45 0.16 150); }
+.feed-icon-conv  { background: color-mix(in oklch, var(--primary) 12%, var(--card)); color: var(--primary); }
+.feed-icon-open  { background: color-mix(in oklch, var(--warning) 14%, var(--card)); color: oklch(0.45 0.14 70); }
+.feed-icon-new   { background: var(--muted); color: var(--muted-foreground); }
+.feed-icon-li    { background: color-mix(in oklch, var(--info) 14%, var(--card)); color: var(--info); }
+.feed-info { flex: 1; min-width: 0; }
+.feed-text { font-size: 13px; color: var(--foreground); line-height: 1.45; }
+.feed-text b { font-weight: 600; }
+.feed-time { font-size: 11.5px; color: var(--muted-foreground); white-space: nowrap; }
+
+/* ── Top performers (campaigns) ───────────────────────────────────────── */
+.perf-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border);
+}
+.perf-row:last-child { border-bottom: 0; }
+.perf-name { font-size: 13px; font-weight: 500; line-height: 1.3; }
+.perf-meta {
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+  margin-top: 2px;
+  display: flex; gap: 6px; align-items: center;
+}
+.perf-meta .sep { width: 3px; height: 3px; border-radius: 50%; background: var(--muted-foreground); opacity: 0.5; }
+.perf-bar {
+  width: 80px; height: 6px;
+  background: var(--muted);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.perf-bar-fill { height: 100%; background: var(--primary); border-radius: 99px; }
+.perf-rate {
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+  min-width: 56px;
+}
+
+/* ── Tasks ────────────────────────────────────────────────────────────── */
+.tasks-list { display: flex; flex-direction: column; }
+.task-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.task-row:last-child { border-bottom: 0; }
+.task-checkbox {
+  width: 18px; height: 18px;
+  border: 1.5px solid color-mix(in oklch, var(--border) 50%, var(--muted-foreground));
+  border-radius: 5px;
+  background: var(--card);
+  flex: 0 0 18px;
+  cursor: pointer;
+  display: grid; place-items: center;
+  color: transparent;
+  transition: all .12s ease;
+}
+.task-checkbox:hover { border-color: var(--muted-foreground); }
+.task-checkbox.is-done {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+.task-text { flex: 1; font-size: 13px; color: var(--foreground); line-height: 1.4; }
+.task-text.is-done { color: var(--muted-foreground); text-decoration: line-through; }
+.task-meta { font-size: 11.5px; color: var(--muted-foreground); }
+.task-due-soon { color: oklch(0.55 0.20 25); font-weight: 500; }
+
+/* ── Hot leads list ──────────────────────────────────────────────────── */
+.hot-row {
+  display: grid;
+  grid-template-columns: 36px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+  color: inherit;
+}
+.hot-row:last-child { border-bottom: 0; }
+.hot-row:hover { background: color-mix(in oklch, var(--muted) 50%, var(--card)); margin: 0 -8px; padding: 11px 8px; border-radius: 4px; }
+.hot-favicon {
+  width: 36px; height: 36px;
+  border-radius: 8px;
+  display: grid; place-items: center;
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  flex: 0 0 36px;
+}
+.hot-name { font-size: 13px; font-weight: 500; }
+.hot-meta { font-size: 11.5px; color: var(--muted-foreground); margin-top: 1px; }
+.hot-score {
+  font-size: 14px;
+  font-weight: 600;
+  color: oklch(0.45 0.16 150);
+  text-align: right;
+  line-height: 1;
+}
+.hot-score .lbl {
+  display: block;
+  font-size: 10.5px;
+  color: var(--muted-foreground);
+  font-weight: 400;
+  margin-top: 2px;
+}
+
+/* ── Quick actions ───────────────────────────────────────────────────── */
+.quick-actions {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.quick-action {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all .12s ease;
+  text-align: left;
+  text-decoration: none;
+  color: inherit;
+}
+.quick-action:hover {
+  border-color: color-mix(in oklch, var(--border) 50%, var(--muted-foreground));
+  background: color-mix(in oklch, var(--muted) 40%, var(--card));
+}
+.quick-action .qa-icon {
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  background: var(--muted);
+  display: grid; place-items: center;
+  color: var(--foreground);
+  flex: 0 0 32px;
+}
+.quick-action .qa-t { font-size: 13px; font-weight: 500; line-height: 1.25; }
+.quick-action .qa-s { font-size: 11.5px; color: var(--muted-foreground); margin-top: 1px; }
+.quick-action .qa-arrow {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  opacity: 0;
+  transition: opacity .12s ease;
+}
+.quick-action:hover .qa-arrow { opacity: 1; }
+
+/* ── Mailbox health (compact) ─────────────────────────────────────────── */
+.mailbox-mini {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+.mailbox-mini:last-child { margin-bottom: 0; }
+.mailbox-mini .logo {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  background: var(--muted);
+  display: grid; place-items: center;
+  flex: 0 0 28px;
+  color: var(--muted-foreground);
+}
+.mailbox-mini .info { flex: 1; min-width: 0; }
+.mailbox-mini .name { font-size: 12.5px; font-weight: 500; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mailbox-mini .meta { font-size: 11px; color: var(--muted-foreground); margin-top: 1px; }
+.mailbox-mini .bar {
+  width: 80px; height: 4px;
+  background: var(--muted);
+  border-radius: 99px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.mailbox-mini .bar-fill { height: 100%; background: var(--primary); border-radius: 99px; }
+.mailbox-mini .bar-fill.is-warning { background: var(--warning); }
+.mailbox-mini .bar-fill.is-danger  { background: var(--destructive); }
+
+/* ── Responsive ──────────────────────────────────────────────────────── */
+@media (max-width: 1200px) {
+  .kpis { grid-template-columns: repeat(2, 1fr); }
+  .dash-grid-2-1, .dash-grid-1-1, .dash-grid-3 { grid-template-columns: 1fr; }
+  .quick-actions { grid-template-columns: repeat(2, 1fr); }
+}
+
 /* Glass utilities */
 @utility glass {
   background: rgba(255, 255, 255, 0.50);
@@ -341,6 +991,12 @@ body {
   --color-accent:              var(--accent);
   --color-accent-foreground:   var(--accent-foreground);
   --color-destructive:         var(--destructive);
+  --color-success:             var(--success);
+  --color-success-foreground:  var(--success-foreground);
+  --color-warning:             var(--warning);
+  --color-warning-foreground:  var(--warning-foreground);
+  --color-info:                var(--info);
+  --color-info-foreground:     var(--info-foreground);
   --color-border:              var(--border);
   --color-input:               var(--input);
   --color-ring:                var(--ring);
@@ -385,6 +1041,14 @@ body {
   --accent-foreground:  oklch(0.546 0.244 263);
 
   --destructive:        oklch(0.577 0.245 27.325);
+
+  /* Semantic status colors (extends primary palette) */
+  --success:            var(--success);   /* emerald 600 vibe */
+  --success-foreground: oklch(1 0 0);
+  --warning:            var(--warning);    /* amber 500 vibe */
+  --warning-foreground: oklch(0.20 0.04 75);
+  --info:               oklch(0.49 0.16 245);       /* LinkedIn brand blue (#0A66C2) */
+  --info-foreground:    oklch(1 0 0);
 
   --border:             oklch(0.90 0.010 247);
   --input:              oklch(0.93 0.008 247);

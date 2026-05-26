@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -712,66 +712,340 @@ function TrackingSection() {
 }
 
 /* ─── Social Accounts ─── */
+interface LinkedInConnectionStatus {
+  ok: boolean;
+  accountId?: string;
+  accountName?: string;
+  plan?: string;
+  error?: string;
+}
+
 function SocialSection() {
-  const platformIcon = (p: string) => p === "linkedin" ? Linkedin : p === "facebook" ? Users : Layers;
-  const platformLabel = (p: string) => p === "linkedin" ? "LinkedIn" : p === "facebook" ? "Facebook" : "Instagram";
-  const [autoConnect, setAutoConnect] = useState(true);
+  /* ── Form State ── */
+  const [apiKey, setApiKey] = useState("");
+  const [accountId, setAccountId] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [showWebhookSecret, setShowWebhookSecret] = useState(false);
+
+  const [dailyLimit, setDailyLimit] = useState(15);
+  const [followUpDays, setFollowUpDays] = useState(3);
+  const [autoOutreach, setAutoOutreach] = useState(false);
   const [mirror, setMirror] = useState(true);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [connection, setConnection] = useState<LinkedInConnectionStatus | null>(null);
+
+  /* ── Load existing settings ── */
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/settings")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled || !j?.data) return;
+        const s = j.data;
+        if (s.connectsafely_api_key)       setApiKey(s.connectsafely_api_key);
+        if (s.connectsafely_account_id)    setAccountId(s.connectsafely_account_id);
+        if (s.connectsafely_webhook_secret) setWebhookSecret(s.connectsafely_webhook_secret);
+        if (typeof s.linkedin_daily_limit === "number")  setDailyLimit(s.linkedin_daily_limit);
+        if (typeof s.linkedin_follow_up_days === "number") setFollowUpDays(s.linkedin_follow_up_days);
+        if (typeof s.linkedin_auto_outreach === "boolean") setAutoOutreach(s.linkedin_auto_outreach);
+        if (s.connectsafely_api_key && s.connectsafely_account_id) {
+          setConnection({ ok: true, accountId: s.connectsafely_account_id });
+        }
+      })
+      .catch(() => { /* silent */ })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  /* ── Test Connection ── */
+  const handleTest = useCallback(async () => {
+    if (!apiKey.trim()) {
+      toast.error("Bitte API-Key eingeben");
+      return;
+    }
+    setTesting(true);
+    try {
+      const res = await fetch("/api/settings/test-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: "connectsafely",
+          credentials: { connectsafely_api_key: apiKey.trim() },
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.data?.ok) {
+        const err = json.data?.error || json.error || "Verbindung fehlgeschlagen";
+        setConnection({ ok: false, error: err });
+        toast.error(err);
+        return;
+      }
+      const data = json.data as LinkedInConnectionStatus;
+      setConnection({ ok: true, accountId: data.accountId, accountName: data.accountName, plan: data.plan });
+      // Account-ID automatisch vorbefüllen
+      if (data.accountId && !accountId) setAccountId(data.accountId);
+      toast.success(`Verbunden${data.accountName ? ` als ${data.accountName}` : ""}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Netzwerkfehler";
+      setConnection({ ok: false, error: msg });
+      toast.error(msg);
+    } finally {
+      setTesting(false);
+    }
+  }, [apiKey, accountId]);
+
+  /* ── Save settings ── */
+  const handleSave = useCallback(async () => {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          connectsafely_api_key: apiKey.trim() || undefined,
+          connectsafely_account_id: accountId.trim() || undefined,
+          connectsafely_webhook_secret: webhookSecret.trim() || undefined,
+          linkedin_daily_limit: dailyLimit,
+          linkedin_follow_up_days: followUpDays,
+          linkedin_auto_outreach: autoOutreach,
+        }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        toast.error(json?.error || "Speichern fehlgeschlagen");
+        return;
+      }
+      toast.success("LinkedIn-Einstellungen gespeichert");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Netzwerkfehler");
+    } finally {
+      setSaving(false);
+    }
+  }, [apiKey, accountId, webhookSecret, dailyLimit, followUpDays, autoOutreach]);
+
+  const isConnected = connection?.ok === true;
+  const webhookUrl = typeof window !== "undefined"
+    ? `${window.location.origin}/api/linkedin/webhook`
+    : "/api/linkedin/webhook";
 
   return (
     <>
       <PageHead
         title="Social-Media-Konten"
-        sub="LinkedIn, Facebook & Instagram für Outreach und Social Selling."
-        actions={<Button size="sm"><Plus className="mr-1.5 size-3.5" /> Konto verbinden</Button>}
+        sub="LinkedIn-Integration für Outreach, Connection-Requests und Nachrichten."
       />
 
-      <Card className="mb-4 shadow-xs">
-        <CardHeader><CardTitle>Verbundene Konten</CardTitle></CardHeader>
-        <CardContent className="grid gap-2">
-          {SOCIAL_ACCOUNTS.map((a) => {
-            const Ic = platformIcon(a.platform);
-            return (
-              <div key={a.id} className="flex items-center gap-3 rounded-lg border p-3">
-                <div className="flex size-9 items-center justify-center rounded-lg text-white" style={{ background: a.bg }}>
-                  <Ic className="size-4" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium truncate">{a.name}</p>
-                  <p className="text-xs text-muted-foreground">{platformLabel(a.platform)} · {a.handle}</p>
-                </div>
-                {a.connected ? (
-                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600">
-                    <Check className="size-3.5" /> Verbunden
-                  </span>
-                ) : (
-                  <Button variant="outline" size="sm">Verbinden</Button>
-                )}
-                <Button variant="ghost" size="icon" className="size-7"><MoreHorizontal className="size-4" /></Button>
-              </div>
-            );
-          })}
-        </CardContent>
-      </Card>
-
+      {/* ── LinkedIn-Integration ── */}
       <Card className="mb-4 shadow-xs">
         <CardHeader>
-          <CardTitle>LinkedIn-Outreach</CardTitle>
-          <CardDescription>Einstellungen für LinkedIn-Nachrichten und Connection-Requests.</CardDescription>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <div className="flex size-7 items-center justify-center rounded-md text-white" style={{ background: "var(--info)" }}>
+                  <Linkedin className="size-3.5" />
+                </div>
+                LinkedIn-Verbindung
+              </CardTitle>
+              <CardDescription>
+                Hinterlege deinen API-Key und verbinde dein LinkedIn-Profil für automatisierten Outreach.
+              </CardDescription>
+            </div>
+            {isConnected && (
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 shrink-0">
+                <Check className="size-3.5" /> Verbunden
+              </span>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="grid gap-5">
-          <div className="py-1">
-            <RowToggle title="Auto-Connect mit personalisierter Nachricht" desc="KI schreibt für jeden Empfänger eine kurze Connection-Nachricht." checked={autoConnect} onCheckedChange={setAutoConnect} />
-            <RowToggle title="Antworten in Inbox spiegeln" desc="LinkedIn-Nachrichten erscheinen in deiner CRM-Inbox." checked={mirror} onCheckedChange={setMirror} />
+
+          {/* API Key */}
+          <div className="grid gap-2">
+            <Label htmlFor="li-api-key">API-Key *</Label>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Key className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/40" />
+                <Input
+                  id="li-api-key"
+                  type={showApiKey ? "text" : "password"}
+                  placeholder={loading ? "Lade…" : "sk_…"}
+                  className="pl-9 pr-9 font-mono text-[12px]"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowApiKey((v) => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 size-6 inline-grid place-items-center rounded text-muted-foreground hover:bg-muted"
+                  aria-label={showApiKey ? "Verstecken" : "Anzeigen"}
+                >
+                  {showApiKey ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
+                </button>
+              </div>
+              <Button
+                variant="outline"
+                onClick={handleTest}
+                disabled={testing || loading || !apiKey.trim()}
+                className="gap-1.5"
+              >
+                {testing
+                  ? <RefreshCw className="size-3.5 animate-spin" />
+                  : <Check className="size-3.5" />}
+                Testen
+              </Button>
+            </div>
+            {connection?.ok === false && (
+              <p className="text-[12px] text-destructive">{connection.error}</p>
+            )}
+            {connection?.ok && (
+              <p className="text-[12px] text-emerald-600">
+                Verbunden{connection.accountName ? ` als ${connection.accountName}` : ""}
+                {connection.plan ? ` · ${formatPlan(connection.plan)}` : ""}
+              </p>
+            )}
           </div>
-          <div className="grid gap-5 sm:grid-cols-2">
-            <div className="grid gap-2"><Label>Max. Connections / Tag</Label><Input defaultValue="20" /></div>
-            <div className="grid gap-2"><Label>Max. Nachrichten / Tag</Label><Input defaultValue="50" /></div>
+
+          {/* Account ID */}
+          <div className="grid gap-2">
+            <Label htmlFor="li-account-id">Konto-ID</Label>
+            <Input
+              id="li-account-id"
+              placeholder="Wird beim Test automatisch ermittelt"
+              className="font-mono text-[12px]"
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+              disabled={loading}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Identifiziert dein verknüpftes LinkedIn-Profil eindeutig.
+            </p>
+          </div>
+
+          {/* Outreach-Limits */}
+          <div className="grid gap-5 sm:grid-cols-2 pt-2 border-t">
+            <div className="grid gap-2">
+              <Label htmlFor="li-daily-limit">Max. Einladungen / Tag</Label>
+              <Input
+                id="li-daily-limit"
+                type="number"
+                min={1}
+                max={20}
+                value={dailyLimit}
+                onChange={(e) => setDailyLimit(Math.max(1, Math.min(20, Number(e.target.value) || 0)))}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Soft-Cap: 80/Woche pro Konto (LinkedIn-Sicherheitslimit: 90/Woche).
+              </p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="li-followup-days">Follow-Up nach Tagen</Label>
+              <Input
+                id="li-followup-days"
+                type="number"
+                min={1}
+                max={30}
+                value={followUpDays}
+                onChange={(e) => setFollowUpDays(Math.max(1, Math.min(30, Number(e.target.value) || 0)))}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Wartezeit nach akzeptierter Vernetzung bis zur ersten Nachricht.
+              </p>
+            </div>
+          </div>
+
+          <div className="py-1 border-t">
+            <RowToggle
+              title="Automatischer Outreach"
+              desc="Aktiviert die täglichen Cron-Jobs für Einladungen + Follow-Ups."
+              checked={autoOutreach}
+              onCheckedChange={setAutoOutreach}
+            />
+            <RowToggle
+              title="Antworten in Inbox spiegeln"
+              desc="LinkedIn-Nachrichten erscheinen in deiner CRM-Inbox."
+              checked={mirror}
+              onCheckedChange={setMirror}
+            />
+          </div>
+        </CardContent>
+        <CardFooter className="flex justify-end gap-2">
+          <Button onClick={handleSave} disabled={saving || loading}>
+            {saving ? <RefreshCw className="mr-1.5 size-3.5 animate-spin" /> : <Check className="mr-1.5 size-3.5" />}
+            Speichern
+          </Button>
+        </CardFooter>
+      </Card>
+
+      {/* ── Webhook ── */}
+      <Card className="mb-4 shadow-xs">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Webhook className="size-4" />
+            Webhook für eingehende Nachrichten
+          </CardTitle>
+          <CardDescription>
+            Hinterlege diese URL bei deinem LinkedIn-Anbieter, damit Antworten in Echtzeit eingehen.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-5">
+          <div className="grid gap-2">
+            <Label>Webhook-URL</Label>
+            <div className="flex gap-2">
+              <Input value={webhookUrl} readOnly className="font-mono text-[12px]" />
+              <Button
+                variant="outline"
+                onClick={() => {
+                  navigator.clipboard.writeText(webhookUrl);
+                  toast.success("URL kopiert");
+                }}
+              >
+                <Copy className="size-3.5" />
+              </Button>
+            </div>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="li-webhook-secret">Webhook Signing Secret</Label>
+            <div className="relative">
+              <Input
+                id="li-webhook-secret"
+                type={showWebhookSecret ? "text" : "password"}
+                placeholder="whsec_…"
+                className="pr-9 font-mono text-[12px]"
+                value={webhookSecret}
+                onChange={(e) => setWebhookSecret(e.target.value)}
+                disabled={loading}
+              />
+              <button
+                type="button"
+                onClick={() => setShowWebhookSecret((v) => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 size-6 inline-grid place-items-center rounded text-muted-foreground hover:bg-muted"
+              >
+                {showWebhookSecret ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
+              </button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Wird zur HMAC-SHA256-Signatur-Verifizierung verwendet. Bei Verlust einfach neu generieren.
+            </p>
           </div>
         </CardContent>
       </Card>
     </>
   );
+}
+
+function formatPlan(plan: string): string {
+  switch (plan) {
+    case "SALES_NAVIGATOR": return "Sales Navigator";
+    case "RECRUITER":       return "Recruiter";
+    case "BUSINESS_PREMIUM": return "Premium";
+    case "NON_PREMIUM":     return "Basic";
+    default: return plan;
+  }
 }
 
 /* ─── CRM-Integrationen ─── */

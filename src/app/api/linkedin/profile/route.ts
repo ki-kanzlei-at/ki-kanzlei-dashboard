@@ -1,9 +1,11 @@
-/* ── API Route: POST /api/linkedin/profile ── */
+/* ── API Route: POST /api/linkedin/profile ──
+ * ConnectSafely-Profil-Abruf mit 120/Tag-Quota (cached calls zählen nicht). */
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getUserSettings } from "@/lib/supabase/settings";
-import { createUnipileClient } from "@/lib/unipile/client";
+import { getUserSettings, getLinkedInIntegration } from "@/lib/supabase/settings";
+import { createConnectSafelyClient, ConnectSafelyError } from "@/lib/connectsafely/client";
+import { enforceQuota, logAction } from "@/lib/connectsafely/rate-limit";
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,9 +16,10 @@ export async function POST(request: NextRequest) {
     }
 
     const settings = await getUserSettings(user.id);
-    if (!settings?.unipile_dsn || !settings?.unipile_api_key || !settings?.unipile_account_id) {
+    const integration = getLinkedInIntegration(settings);
+    if (!integration) {
       return NextResponse.json(
-        { error: "Unipile nicht konfiguriert" },
+        { error: "LinkedIn-Integration nicht konfiguriert" },
         { status: 400 },
       );
     }
@@ -26,10 +29,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Profil-Identifier fehlt" }, { status: 400 });
     }
 
-    const client = createUnipileClient(settings.unipile_dsn, settings.unipile_api_key);
-    const profile = await client.getProfile(settings.unipile_account_id, identifier.trim());
+    try {
+      await enforceQuota(user.id, "profilePerDay");
+    } catch (e) {
+      const err = e as Error & { status?: number; resetAt?: string };
+      return NextResponse.json(
+        { error: err.message, resetAt: err.resetAt },
+        { status: err.status ?? 429 },
+      );
+    }
 
-    return NextResponse.json({ data: profile });
+    const client = createConnectSafelyClient(integration.apiKey, integration.accountId);
+    try {
+      const profile = await client.getProfile(integration.accountId, identifier.trim());
+      // Only log if not from cache — ConnectSafely cached responses don't count
+      // against the 120/day limit. We log conservatively (always) since the raw
+      // response is mapped into LegacyProfile and we lose `cached` flag there.
+      logAction(user.id, "profilePerDay", { identifier }).catch(() => {});
+      return NextResponse.json({ data: profile });
+    } catch (e) {
+      const err = e as ConnectSafelyError;
+      return NextResponse.json(
+        { error: err.message, resetAt: err.rateLimitReset },
+        { status: err.status ?? 502 },
+      );
+    }
   } catch (error) {
     console.error("[API /api/linkedin/profile]", error);
     const message = error instanceof Error ? error.message : "Interner Serverfehler";

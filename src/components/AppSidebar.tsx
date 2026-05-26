@@ -40,6 +40,8 @@ type NavItem = {
     count?: number | string;
     /** Dynamische Lead-Count-Anbindung */
     isLeadsCount?: boolean;
+    /** Dynamische LinkedIn-Lead-Count-Anbindung */
+    isLinkedInCount?: boolean;
 };
 const sections: { label: string; items: NavItem[] }[] = [
     {
@@ -58,7 +60,7 @@ const sections: { label: string; items: NavItem[] }[] = [
             { name: "Kontakte",    href: "/dashboard/contacts",         icon: Contact,  disabled: true, count: 186 },
             { name: "Pipeline",    href: "/dashboard/pipeline",         icon: GitBranch, disabled: true },
             { name: "Kampagnen",   href: "/dashboard/campaigns",        icon: Send,     count: 7 },
-            { name: "LinkedIn",    href: "/dashboard/linkedin",         icon: Linkedin },
+            { name: "LinkedIn",    href: "/dashboard/linkedin",         icon: Linkedin, isLinkedInCount: true },
             { name: "Suchverlauf", href: "/dashboard/leads?tab=search", icon: History },
         ],
     },
@@ -119,11 +121,16 @@ export function AppSidebar({ user, role = "user" }: AppSidebarProps) {
 
     // Dynamische Lead-Count (kein UI-Block wenn fetch fehlschlägt)
     const [leadsCount, setLeadsCount] = useState<number | null>(null);
+    const [linkedinCount, setLinkedinCount] = useState<number | null>(null);
     useEffect(() => {
         let cancelled = false;
         fetch("/api/leads?limit=1&page=1")
             .then((r) => (r.ok ? r.json() : null))
             .then((j) => { if (!cancelled && j?.count != null) setLeadsCount(j.count); })
+            .catch(() => {});
+        fetch("/api/linkedin/stats")
+            .then((r) => (r.ok ? r.json() : null))
+            .then((j) => { if (!cancelled && j?.data?.total != null) setLinkedinCount(j.data.total); })
             .catch(() => {});
         return () => { cancelled = true; };
     }, [pathname]);
@@ -186,13 +193,15 @@ export function AppSidebar({ user, role = "user" }: AppSidebarProps) {
                         <SidebarGroupContent>
                             <SidebarMenu>
                                 {section.items.map((item) => {
-                                    const { name, href, icon: Icon, disabled, pip, count, isLeadsCount } = item;
+                                    const { name, href, icon: Icon, disabled, pip, count, isLeadsCount, isLinkedInCount } = item;
                                     const active = isActive(pathname, href);
                                     const displayCount = isLeadsCount
                                         ? (leadsCount != null ? leadsCount.toLocaleString("de-DE") : undefined)
-                                        : count != null
-                                            ? typeof count === "number" ? count.toLocaleString("de-DE") : count
-                                            : undefined;
+                                        : isLinkedInCount
+                                            ? (linkedinCount != null ? linkedinCount.toLocaleString("de-DE") : undefined)
+                                            : count != null
+                                                ? typeof count === "number" ? count.toLocaleString("de-DE") : count
+                                                : undefined;
                                     return (
                                         <SidebarMenuItem key={href}>
                                             <SidebarMenuButton

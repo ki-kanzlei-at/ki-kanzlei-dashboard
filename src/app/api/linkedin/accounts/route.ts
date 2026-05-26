@@ -1,9 +1,12 @@
-/* ── API Route: GET /api/linkedin/accounts ── */
+/* ── API Route: GET /api/linkedin/accounts ──
+ * ConnectSafely hat keine list-all-accounts API: ein API-Key = ein Konto.
+ * Wir geben dieses eine Konto in Legacy-Shape zurück, damit bestehende
+ * UI-Komponenten weiterlaufen. */
 
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getUserSettings } from "@/lib/supabase/settings";
-import { createUnipileClient } from "@/lib/unipile/client";
+import { getUserSettings, getLinkedInIntegration } from "@/lib/supabase/settings";
+import { createConnectSafelyClient } from "@/lib/connectsafely/client";
 
 export async function GET() {
   try {
@@ -14,26 +17,23 @@ export async function GET() {
     }
 
     const settings = await getUserSettings(user.id);
-    if (!settings?.unipile_dsn || !settings?.unipile_api_key) {
+    const integration = getLinkedInIntegration(settings);
+    if (!integration) {
       return NextResponse.json(
-        { error: "Unipile nicht konfiguriert" },
+        { error: "LinkedIn-Integration nicht konfiguriert" },
         { status: 400 },
       );
     }
 
-    const client = createUnipileClient(settings.unipile_dsn, settings.unipile_api_key);
+    const client = createConnectSafelyClient(integration.apiKey, integration.accountId);
     const accounts = await client.getAccounts();
 
-    // Map accounts (fast — no profile fetch)
     const mapped = accounts.map((acc) => {
       const premiumFeatures = acc.connection_params?.im?.premiumFeatures ?? [];
-      const isSalesNav = premiumFeatures.includes("sales_navigator");
-      const isPremium = premiumFeatures.length > 0;
-
       return {
         id: acc.id,
         name: acc.name ?? acc.connection_params?.im?.username ?? acc.id,
-        type: isSalesNav ? "sales_navigator" : isPremium ? "premium" : "classic",
+        type: acc.type ?? "classic",
         premiumFeatures,
         status: acc.status ?? "OK",
         publicIdentifier: acc.connection_params?.im?.publicIdentifier ?? null,

@@ -20,7 +20,7 @@ import {
   getRegionOptions,
   getRegionLabel,
 } from "@/types/leads";
-import type { UnipileSearchResult } from "@/lib/unipile/types";
+import type { LegacySearchResult as UnipileSearchResult } from "@/lib/connectsafely/types";
 
 /* ── LinkedIn Account Limits ── */
 const ACCOUNT_LIMITS = {
@@ -69,7 +69,7 @@ export function LinkedInSearchForm({ onImported }: LinkedInSearchFormProps) {
         const json = await res.json();
         const settingsRes = await fetch("/api/settings");
         const settingsJson = await settingsRes.json();
-        const savedId = settingsJson.data?.unipile_account_id;
+        const savedId = settingsJson.data?.connectsafely_account_id ?? settingsJson.data?.unipile_account_id;
         const accounts = json.data ?? [];
         const match = savedId
           ? accounts.find((a: { id: string }) => a.id === savedId)

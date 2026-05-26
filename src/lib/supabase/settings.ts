@@ -92,7 +92,11 @@ export interface UserSettings {
   zoho_client_secret: string | null;
   zoho_refresh_token: string | null;
   webhook_url: string | null;
-  /* Unipile / LinkedIn */
+  /* ConnectSafely / LinkedIn */
+  connectsafely_api_key: string | null;
+  connectsafely_account_id: string | null;
+  connectsafely_webhook_secret: string | null;
+  /* Unipile (DEPRECATED — kept transient for migration only) */
   unipile_api_key: string | null;
   unipile_dsn: string | null;
   unipile_account_id: string | null;
@@ -126,6 +130,9 @@ export type UserSettingsUpdate = Partial<
     | "zoho_client_secret"
     | "zoho_refresh_token"
     | "webhook_url"
+    | "connectsafely_api_key"
+    | "connectsafely_account_id"
+    | "connectsafely_webhook_secret"
     | "unipile_api_key"
     | "unipile_dsn"
     | "unipile_account_id"
@@ -208,13 +215,41 @@ export async function getAllAutoOutreachUsers(): Promise<UserSettings[]> {
     .from("user_settings")
     .select("*")
     .eq("linkedin_auto_outreach", true)
-    .not("unipile_api_key", "is", null)
-    .not("unipile_dsn", "is", null)
-    .not("unipile_account_id", "is", null);
+    .not("connectsafely_api_key", "is", null)
+    .not("connectsafely_account_id", "is", null);
 
   if (error) {
     throw new Error(`Fehler beim Laden der Auto-Outreach User: ${error.message}`);
   }
 
   return (data ?? []) as UserSettings[];
+}
+
+/* ── Hilfen für die LinkedIn-Integration ───────────────────────
+ * Single Source of Truth ob die LinkedIn-Integration einsatzbereit ist
+ * und welcher API-Key/Account zu verwenden ist. */
+
+export interface LinkedInIntegration {
+  apiKey: string;
+  accountId: string;
+  webhookSecret: string | null;
+}
+
+export function getLinkedInIntegration(
+  settings: Partial<UserSettings> | null | undefined,
+): LinkedInIntegration | null {
+  const apiKey    = settings?.connectsafely_api_key?.trim();
+  const accountId = settings?.connectsafely_account_id?.trim();
+  if (!apiKey || !accountId) return null;
+  return {
+    apiKey,
+    accountId,
+    webhookSecret: settings?.connectsafely_webhook_secret ?? null,
+  };
+}
+
+export function isLinkedInConfigured(
+  settings: Partial<UserSettings> | null | undefined,
+): boolean {
+  return !!getLinkedInIntegration(settings);
 }

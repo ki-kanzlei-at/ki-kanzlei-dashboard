@@ -100,6 +100,11 @@ export async function PATCH(request: NextRequest) {
       zoho_client_secret: sanitizeString(body.zoho_client_secret, 512),
       zoho_refresh_token: sanitizeString(body.zoho_refresh_token, 512),
       webhook_url: sanitizeUrl(body.webhook_url),
+      /* ConnectSafely (aktuelle LinkedIn-Integration) */
+      connectsafely_api_key: sanitizeString(body.connectsafely_api_key, 512),
+      connectsafely_account_id: sanitizeString(body.connectsafely_account_id, 256),
+      connectsafely_webhook_secret: sanitizeString(body.connectsafely_webhook_secret, 512),
+      /* Unipile (DEPRECATED — bleibt für Migration-Reads) */
       unipile_api_key: sanitizeString(body.unipile_api_key, 512),
       unipile_dsn: sanitizeUrl(body.unipile_dsn),
       unipile_account_id: sanitizeString(body.unipile_account_id, 256),

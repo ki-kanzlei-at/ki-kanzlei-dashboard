@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { testConnection as testMicrosoftGraph } from "@/lib/email/microsoft-graph";
 import type { CrmProvider } from "@/lib/crm/types";
 
-type TestProvider = CrmProvider | "unipile" | "microsoft-graph";
+type TestProvider = CrmProvider | "unipile" | "connectsafely" | "microsoft-graph";
 
 export async function POST(request: NextRequest) {
   try {
@@ -70,6 +70,12 @@ export async function POST(request: NextRequest) {
         const key = credentials.unipile_api_key;
         if (!dsn?.trim() || !key?.trim()) return NextResponse.json({ error: "DSN und API Key erforderlich" }, { status: 400 });
         result = await testUnipile(dsn.trim(), key.trim());
+        break;
+      }
+      case "connectsafely": {
+        const key = credentials.connectsafely_api_key;
+        if (!key?.trim()) return NextResponse.json({ error: "LinkedIn-API-Key erforderlich" }, { status: 400 });
+        result = await testConnectSafely(key.trim());
         break;
       }
       case "microsoft-graph": {
@@ -189,6 +195,35 @@ async function testWebhook(url: string): Promise<{ ok: boolean; error?: string }
     return { ok: false, error: `HTTP ${res.status}` };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "URL nicht erreichbar" };
+  }
+}
+
+async function testConnectSafely(apiKey: string): Promise<{ ok: boolean; error?: string; accountId?: string; accountName?: string; plan?: string }> {
+  try {
+    const res = await fetch("https://api.connectsafely.ai/account/status", {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) {
+      if (res.status === 401) return { ok: false, error: "Ungültiger LinkedIn-API-Key" };
+      if (res.status === 403) return { ok: false, error: "Zugriff verweigert (Abo prüfen)" };
+      if (res.status === 404) return {
+        ok: false,
+        error: "Noch kein LinkedIn-Konto verbunden. Bitte zuerst dein LinkedIn-Profil über die Integration verknüpfen.",
+      };
+      return { ok: false, error: `HTTP ${res.status}` };
+    }
+    const data = await res.json();
+    return {
+      ok: true,
+      accountId: data.id,
+      accountName: [data.firstName, data.lastName].filter(Boolean).join(" ") || data.publicId,
+      plan: data.linkedinPlan?.premiumType ?? "NON_PREMIUM",
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Verbindung fehlgeschlagen" };
   }
 }
 
