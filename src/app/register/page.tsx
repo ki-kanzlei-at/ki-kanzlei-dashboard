@@ -1,351 +1,347 @@
 "use client";
 
-import Image from "next/image";
+import { useState, useMemo } from "react";
 import Link from "next/link";
-import { useState } from "react";
-import { z } from "zod";
+import { useRouter } from "next/navigation";
 import {
-    Eye, EyeOff, AlertCircle, CheckCircle2,
-    Search, Sparkles, BarChart3, Shield, UserPlus,
+  AlertCircle, ArrowRight, CheckCircle2,
+  Eye, EyeOff, Loader2,
 } from "lucide-react";
-import { Spinner } from "@/components/ui/spinner";
+
 import { createClient } from "@/lib/supabase/client";
-import { OAuthButtons } from "@/components/auth/OAuthButtons";
+import { AuthBrandPanel } from "@/components/auth/AuthBrandPanel";
+import { AuthOAuthRow } from "@/components/auth/AuthOAuthRow";
+import { cn } from "@/lib/utils";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardFooter,
-    CardHeader,
-    CardTitle,
-} from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import { Input } from "@/components/ui/input";
 
-const schema = z.object({
-    name: z.string().min(1, "Name ist erforderlich"),
-    email: z.string().min(1, "E-Mail ist erforderlich").email("Keine gültige E-Mail"),
-    password: z.string().min(6, "Mindestens 6 Zeichen erforderlich"),
-    confirmPassword: z.string().min(1, "Bitte Passwort bestätigen"),
-}).refine((data) => data.password === data.confirmPassword, {
-    message: "Die Passwörter stimmen nicht überein",
-    path: ["confirmPassword"],
-});
+interface PwdStrength {
+  level: number;
+  label: "weak" | "medium" | "strong";
+  text: string;
+}
 
-const features = [
-    { icon: Search, label: "Leads automatisch finden" },
-    { icon: Sparkles, label: "KI-gestützte Datenanreicherung" },
-    { icon: BarChart3, label: "Pipeline & Statusverfolgung" },
-    { icon: Shield, label: "DSGVO-konform & sicher" },
-];
+function pwdStrength(pwd: string): PwdStrength {
+  let score = 0;
+  if (pwd.length >= 8) score++;
+  if (pwd.length >= 12) score++;
+  if (/[A-Z]/.test(pwd) && /[a-z]/.test(pwd)) score++;
+  if (/[0-9]/.test(pwd) && /[^A-Za-z0-9]/.test(pwd)) score++;
+  if (score === 0) return { level: 0, label: "weak",   text: "" };
+  if (score === 1) return { level: 1, label: "weak",   text: "Schwach — füge mehr Zeichen hinzu" };
+  if (score === 2) return { level: 2, label: "medium", text: "Okay — Groß-/Kleinschreibung & Zahl helfen" };
+  if (score === 3) return { level: 3, label: "medium", text: "Gut — füge ein Sonderzeichen hinzu" };
+  return                     { level: 4, label: "strong", text: "Stark · sehr sicheres Passwort" };
+}
+
+function mapAuthError(message: string): string {
+  const m = message.toLowerCase();
+  if (m.includes("already registered") || m.includes("user already") || m.includes("already exists"))
+    return "Diese E-Mail ist bereits registriert. Bitte melde dich an.";
+  if (m.includes("invalid email") || m.includes("email_invalid"))
+    return "Bitte eine gültige E-Mail-Adresse eingeben.";
+  if (m.includes("password") && m.includes("short"))
+    return "Passwort zu kurz — mindestens 8 Zeichen.";
+  if (m.includes("signups not allowed") || m.includes("signup is disabled") || m.includes("signups disabled"))
+    return "Registrierungen sind aktuell nicht freigegeben. Bitte wende dich an office@ki-kanzlei.at, um einen Zugang zu erhalten.";
+  if (m.includes("rate limit") || m.includes("too many requests"))
+    return "Zu viele Versuche. Bitte warte einen Moment.";
+  return `Registrierung fehlgeschlagen: ${message}`;
+}
+
+function AuthDivider({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 my-5">
+      <Separator className="flex-1" />
+      <span className="text-[11.5px] uppercase tracking-[0.06em] text-muted-foreground font-medium">
+        {children}
+      </span>
+      <Separator className="flex-1" />
+    </div>
+  );
+}
 
 export default function RegisterPage() {
-    const [name, setName] = useState("");
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [confirmPassword, setConfirmPassword] = useState("");
-    const [showPw, setShowPw] = useState(false);
-    const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-    const [success, setSuccess] = useState(false);
+  const router = useRouter();
+  const [name, setName] = useState("");
+  const [company, setCompany] = useState("");
+  const [email, setEmail] = useState("");
+  const [pwd, setPwd] = useState("");
+  const [show, setShow] = useState(false);
+  const [optIn, setOptIn] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<{ email: string } | null>(null);
+  const [loading, setLoading] = useState(false);
 
-    async function handleSubmit(e: React.FormEvent) {
-        e.preventDefault();
-        setError(null);
-        setFieldErrors({});
+  const strength = useMemo(() => pwdStrength(pwd), [pwd]);
+  const canSubmit = name.trim() && company.trim() && email.trim() && pwd.length >= 8 && !loading;
 
-        const result = schema.safeParse({ name, email, password, confirmPassword });
-        if (!result.success) {
-            const errs: Record<string, string> = {};
-            for (const issue of result.error.issues) {
-                const key = String(issue.path[0]);
-                if (!errs[key]) errs[key] = issue.message;
-            }
-            setFieldErrors(errs);
-            return;
-        }
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
 
-        setIsLoading(true);
-        try {
-            const supabase = createClient();
-            const { error: authError } = await supabase.auth.signUp({
-                email: result.data.email,
-                password: result.data.password,
-                options: {
-                    data: { display_name: result.data.name },
-                },
-            });
-
-            if (authError) {
-                setIsLoading(false);
-                if (authError.message.toLowerCase().includes("already registered")) {
-                    setError("Diese E-Mail ist bereits registriert. Bitte melde dich an.");
-                } else {
-                    setError(`Registrierung fehlgeschlagen: ${authError.message}`);
-                }
-                return;
-            }
-
-            setSuccess(true);
-        } catch {
-            setError("Verbindung fehlgeschlagen. Bitte prüfe deine Internetverbindung.");
-        } finally {
-            setIsLoading(false);
-        }
+    if (!name.trim() || !company.trim() || !email.trim()) {
+      setError("Bitte alle Felder ausfüllen.");
+      return;
+    }
+    if (pwd.length < 8) {
+      setError("Passwort muss mindestens 8 Zeichen lang sein.");
+      return;
     }
 
-    function clearErrors() {
-        setFieldErrors({});
-        setError(null);
-    }
+    setLoading(true);
+    try {
+      const supabase = createClient();
+      const { data, error: authError } = await supabase.auth.signUp({
+        email: email.trim(),
+        password: pwd,
+        options: {
+          data: {
+            display_name: name.trim(),
+            company_name: company.trim(),
+            marketing_opt_in: optIn,
+          },
+          emailRedirectTo: `${window.location.origin}/auth/callback?next=/onboarding`,
+        },
+      });
 
+      if (authError) {
+        setError(mapAuthError(authError.message));
+        return;
+      }
+
+      if (!data.session) {
+        setSuccess({ email: email.trim() });
+        return;
+      }
+
+      router.push("/onboarding");
+      router.refresh();
+    } catch {
+      setError("Verbindung fehlgeschlagen. Bitte prüfe deine Internetverbindung.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (success) {
     return (
-        <div className="min-h-screen w-full flex relative">
-
-            {/* Left: Brand panel */}
-            <div
-                className="hidden lg:flex lg:w-[46%] xl:w-[50%] flex-col justify-between p-12 xl:p-14 relative overflow-hidden"
-                style={{
-                    background: "linear-gradient(150deg, oklch(0.32 0.16 263) 0%, oklch(0.44 0.22 263) 40%, oklch(0.50 0.24 258) 100%)",
-                }}
-            >
-                <div className="pointer-events-none absolute top-0 right-0 w-[600px] h-[600px] opacity-25 rounded-full"
-                    style={{ background: "radial-gradient(circle, oklch(0.65 0.20 263) 0%, transparent 60%)", transform: "translate(25%,-25%)" }} />
-                <div className="pointer-events-none absolute bottom-0 left-0 w-[450px] h-[450px] opacity-15 rounded-full"
-                    style={{ background: "radial-gradient(circle, oklch(0.50 0.22 280) 0%, transparent 65%)", transform: "translate(-30%,30%)" }} />
-
-                <div className="relative z-10 flex items-center gap-3">
-                    <Image
-                        src="/images/KI-Kanzlei_Logo_2026.png"
-                        alt="KI Kanzlei"
-                        width={176}
-                        height={176}
-                        quality={100}
-                        className="h-11 w-11 rounded-lg shadow-lg shadow-black/20"
-                        priority
-                    />
-                    <span className="text-lg font-bold text-white tracking-tight">KI Kanzlei</span>
-                </div>
-
-                <div className="relative z-10 space-y-8">
-                    <h1 className="text-3xl xl:text-4xl font-bold text-white leading-tight tracking-tight">
-                        Dein Vertrieb.<br />
-                        <span className="text-white/40">Voll automatisiert.</span>
-                    </h1>
-
-                    <div className="space-y-3">
-                        {features.map(({ icon: Icon, label }) => (
-                            <div key={label} className="flex items-center gap-3">
-                                <div className="h-8 w-8 rounded-lg bg-white/10 border border-white/10 flex items-center justify-center flex-shrink-0">
-                                    <Icon className="h-4 w-4 text-white/70" />
-                                </div>
-                                <span className="text-sm text-white/60 font-medium">{label}</span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-
-                <p className="relative z-10 text-white/20 text-xs">
-                    &copy; {new Date().getFullYear()} KI Kanzlei. Alle Rechte vorbehalten.
+      <div className="auth-shell">
+        <AuthBrandPanel />
+        <div className="auth-form-panel">
+          <div className="auth-form-top">
+            <span>
+              Bereits einen Account?
+              <Link href="/login">Anmelden</Link>
+            </span>
+          </div>
+          <div className="auth-form-wrap">
+            <div className="w-full max-w-[380px]">
+              <div className="mb-7">
+                <h1 className="m-0 mb-2 text-[26px] font-semibold tracking-[-0.025em] leading-[1.15]">
+                  Bestätigungsmail gesendet
+                </h1>
+                <p className="m-0 text-[13.5px] text-muted-foreground">
+                  Wir haben dir eine Bestätigungsmail an <b className="text-foreground">{success.email}</b> gesendet.
+                  Klick auf den Link, um deinen Account zu aktivieren — danach starten wir dein Setup.
                 </p>
+              </div>
+              <Alert className="mb-4 border-emerald-200 bg-emerald-50 text-emerald-800 [&>svg]:text-emerald-600">
+                <CheckCircle2 />
+                <AlertDescription>
+                  Prüfe auch deinen Spam-Ordner — manchmal landen die Mails dort.
+                </AlertDescription>
+              </Alert>
+              <Button asChild className="w-full h-10 gap-2">
+                <Link href="/login">
+                  Zur Anmeldung <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              </Button>
             </div>
-
-            {/* Right: Form */}
-            <div className="flex-1 flex flex-col items-center justify-center p-6 bg-background relative overflow-hidden">
-                <div className="pointer-events-none absolute inset-0">
-                    <div className="absolute -top-40 -right-40 w-[500px] h-[500px] rounded-full opacity-20"
-                        style={{ background: "radial-gradient(circle, oklch(0.546 0.244 263 / 0.2) 0%, transparent 70%)" }} />
-                </div>
-
-                <div className="lg:hidden mb-8 flex items-center gap-2.5">
-                    <Image
-                        src="/images/KI-Kanzlei_Logo_2026.png"
-                        alt="KI Kanzlei"
-                        width={72}
-                        height={72}
-                        quality={100}
-                        className="h-9 w-9 rounded-lg shadow-md"
-                        priority
-                    />
-                    <span className="text-lg font-bold text-foreground tracking-tight">KI Kanzlei</span>
-                </div>
-
-                <div className="relative z-10 w-full max-w-sm">
-                    <Card className="glass-panel border-white/60 shadow-2xl shadow-black/8 overflow-hidden">
-                        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent" />
-
-                        <CardHeader className="pt-8 pb-5 px-7">
-                            <CardTitle className="text-xl font-bold text-foreground">
-                                Konto erstellen
-                            </CardTitle>
-                            <CardDescription>
-                                Registriere dich, um loszulegen
-                            </CardDescription>
-                        </CardHeader>
-
-                        <CardContent className="px-7 pb-5">
-                            {success ? (
-                                <div className="space-y-5 text-center py-4">
-                                    <div className="h-12 w-12 rounded-full bg-emerald-50 flex items-center justify-center mx-auto">
-                                        <CheckCircle2 className="h-6 w-6 text-emerald-600" />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <p className="text-sm font-semibold text-foreground">Bestätigungsmail gesendet</p>
-                                        <p className="text-xs text-muted-foreground leading-relaxed">
-                                            Wir haben eine Bestätigungsmail an{" "}
-                                            <span className="font-medium text-foreground">{email}</span> gesendet.
-                                            Bitte prüfe dein Postfach.
-                                        </p>
-                                    </div>
-                                    <Link href="/login">
-                                        <Button variant="outline" className="w-full h-10 mt-2">
-                                            Zur Anmeldung
-                                        </Button>
-                                    </Link>
-                                </div>
-                            ) : (
-                                <div className="space-y-5">
-                                    <OAuthButtons />
-
-                                    <div className="flex items-center gap-3">
-                                        <Separator className="flex-1" />
-                                        <span className="text-xs text-muted-foreground/60 font-medium">oder</span>
-                                        <Separator className="flex-1" />
-                                    </div>
-
-                                    <form onSubmit={handleSubmit} className="space-y-4">
-                                        {error && (
-                                            <Alert variant="destructive">
-                                                <AlertCircle className="h-4 w-4" />
-                                                <AlertDescription>{error}</AlertDescription>
-                                            </Alert>
-                                        )}
-
-                                        <div className="space-y-2">
-                                            <Label htmlFor="name">Name</Label>
-                                            <Input
-                                                id="name"
-                                                type="text"
-                                                placeholder="Max Mustermann"
-                                                autoComplete="name"
-                                                value={name}
-                                                onChange={(e) => { setName(e.target.value); clearErrors(); }}
-                                                className={`h-11 bg-white/60 border-border/60 focus:bg-white transition-colors ${fieldErrors.name ? "border-destructive focus-visible:ring-destructive" : ""}`}
-                                                disabled={isLoading}
-                                            />
-                                            {fieldErrors.name && (
-                                                <p className="text-xs text-destructive">{fieldErrors.name}</p>
-                                            )}
-                                        </div>
-
-                                        <div className="space-y-2">
-                                            <Label htmlFor="email">E-Mail Adresse</Label>
-                                            <Input
-                                                id="email"
-                                                type="email"
-                                                placeholder="max@mustermann.at"
-                                                autoComplete="email"
-                                                value={email}
-                                                onChange={(e) => { setEmail(e.target.value); clearErrors(); }}
-                                                className={`h-11 bg-white/60 border-border/60 focus:bg-white transition-colors ${fieldErrors.email ? "border-destructive focus-visible:ring-destructive" : ""}`}
-                                                disabled={isLoading}
-                                            />
-                                            {fieldErrors.email && (
-                                                <p className="text-xs text-destructive">{fieldErrors.email}</p>
-                                            )}
-                                        </div>
-
-                                        <div className="space-y-2">
-                                            <Label htmlFor="password">Passwort</Label>
-                                            <div className="relative">
-                                                <Input
-                                                    id="password"
-                                                    type={showPw ? "text" : "password"}
-                                                    placeholder="Mindestens 6 Zeichen"
-                                                    autoComplete="new-password"
-                                                    value={password}
-                                                    onChange={(e) => { setPassword(e.target.value); clearErrors(); }}
-                                                    className={`h-11 pr-10 bg-white/60 border-border/60 focus:bg-white transition-colors ${fieldErrors.password ? "border-destructive focus-visible:ring-destructive" : ""}`}
-                                                    disabled={isLoading}
-                                                />
-                                                <Button
-                                                    type="button"
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    tabIndex={-1}
-                                                    onClick={() => setShowPw((v) => !v)}
-                                                    className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-muted-foreground hover:text-foreground"
-                                                >
-                                                    {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                                                </Button>
-                                            </div>
-                                            {fieldErrors.password && (
-                                                <p className="text-xs text-destructive">{fieldErrors.password}</p>
-                                            )}
-                                        </div>
-
-                                        <div className="space-y-2">
-                                            <Label htmlFor="confirm-password">Passwort bestätigen</Label>
-                                            <Input
-                                                id="confirm-password"
-                                                type={showPw ? "text" : "password"}
-                                                placeholder="Passwort wiederholen"
-                                                autoComplete="new-password"
-                                                value={confirmPassword}
-                                                onChange={(e) => { setConfirmPassword(e.target.value); clearErrors(); }}
-                                                className={`h-11 bg-white/60 border-border/60 focus:bg-white transition-colors ${fieldErrors.confirmPassword ? "border-destructive focus-visible:ring-destructive" : ""}`}
-                                                disabled={isLoading}
-                                            />
-                                            {fieldErrors.confirmPassword && (
-                                                <p className="text-xs text-destructive">{fieldErrors.confirmPassword}</p>
-                                            )}
-                                        </div>
-
-                                        <Button
-                                            type="submit"
-                                            className="w-full h-11 font-semibold tracking-wide shadow-md shadow-primary/20 hover:shadow-primary/35 transition-shadow"
-                                            disabled={isLoading}
-                                        >
-                                            {isLoading ? (
-                                                <span className="flex items-center gap-2">
-                                                    <Spinner className="h-4 w-4" />
-                                                    Wird registriert…
-                                                </span>
-                                            ) : (
-                                                <span className="flex items-center gap-2">
-                                                    <UserPlus className="h-4 w-4" />
-                                                    Konto erstellen
-                                                </span>
-                                            )}
-                                        </Button>
-                                    </form>
-                                </div>
-                            )}
-                        </CardContent>
-
-                        <CardFooter className="flex flex-col gap-4 px-7 pb-7 pt-0">
-                            {!success && (
-                                <p className="text-center text-sm text-muted-foreground">
-                                    Bereits ein Konto?{" "}
-                                    <Link href="/login" className="text-primary hover:text-primary/80 font-medium transition-colors">
-                                        Anmelden
-                                    </Link>
-                                </p>
-                            )}
-                            <div className="flex items-center gap-3 w-full">
-                                <Separator className="flex-1" />
-                                <span className="text-xs text-muted-foreground/50 font-medium">Verschlüsselte Verbindung</span>
-                                <Separator className="flex-1" />
-                            </div>
-                        </CardFooter>
-                    </Card>
-                </div>
-            </div>
+          </div>
+          <FooterLinks />
         </div>
+      </div>
     );
+  }
+
+  return (
+    <div className="auth-shell">
+      <AuthBrandPanel />
+
+      <div className="auth-form-panel">
+        <div className="auth-form-top">
+          <span>
+            Bereits einen Account?
+            <Link href="/login">Anmelden</Link>
+          </span>
+        </div>
+
+        <div className="auth-form-wrap">
+          <form className="w-full max-w-[380px]" onSubmit={submit} noValidate>
+            <div className="mb-7">
+              <h1 className="m-0 mb-2 text-[26px] font-semibold tracking-[-0.025em] leading-[1.15]">
+                Account erstellen
+              </h1>
+              <p className="m-0 text-[13.5px] text-muted-foreground">
+                Starte deine Outreach Plattform in unter 2 Minuten.
+              </p>
+            </div>
+
+            {error && (
+              <Alert variant="destructive" className="mb-4">
+                <AlertCircle />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+
+            <AuthOAuthRow mode="register" />
+
+            <AuthDivider>oder per E-Mail</AuthDivider>
+
+            <div className="space-y-2 mb-3.5">
+              <Label htmlFor="reg-name" className="text-[12.5px] font-medium">
+                Vollständiger Name
+              </Label>
+              <Input
+                id="reg-name"
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Max Mustermann"
+                autoComplete="name"
+                autoFocus
+                className="h-10"
+              />
+            </div>
+
+            <div className="space-y-2 mb-3.5">
+              <Label htmlFor="reg-company" className="text-[12.5px] font-medium">
+                Unternehmen / Firma
+              </Label>
+              <Input
+                id="reg-company"
+                type="text"
+                value={company}
+                onChange={(e) => setCompany(e.target.value)}
+                placeholder="z. B. Acme Studio GmbH"
+                autoComplete="organization"
+                className="h-10"
+              />
+            </div>
+
+            <div className="space-y-2 mb-3.5">
+              <Label htmlFor="reg-email" className="text-[12.5px] font-medium">
+                Geschäftliche E-Mail
+              </Label>
+              <Input
+                id="reg-email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="name@firma.at"
+                autoComplete="email"
+                className="h-10"
+              />
+            </div>
+
+            <div className="space-y-2 mb-2">
+              <Label htmlFor="reg-pwd" className="text-[12.5px] font-medium">
+                Passwort
+              </Label>
+              <div className="relative">
+                <Input
+                  id="reg-pwd"
+                  type={show ? "text" : "password"}
+                  value={pwd}
+                  onChange={(e) => setPwd(e.target.value)}
+                  placeholder="Mindestens 8 Zeichen"
+                  autoComplete="new-password"
+                  className="h-10 pr-10"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  tabIndex={-1}
+                  onClick={() => setShow((v) => !v)}
+                  aria-label={show ? "Verbergen" : "Anzeigen"}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-muted-foreground hover:text-foreground"
+                >
+                  {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                </Button>
+              </div>
+              {pwd.length > 0 && (
+                <>
+                  <div className="flex gap-1 mt-2">
+                    {[0, 1, 2, 3].map((i) => (
+                      <div
+                        key={i}
+                        className={cn(
+                          "flex-1 h-[3px] rounded-full transition-colors",
+                          i < strength.level
+                            ? strength.label === "weak"   ? "bg-destructive"
+                            : strength.label === "medium" ? "bg-amber-500"
+                            :                                "bg-emerald-500"
+                            : "bg-muted",
+                        )}
+                      />
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">{strength.text}</p>
+                </>
+              )}
+            </div>
+
+            <p className="text-[11.5px] text-muted-foreground leading-[1.55] mt-3">
+              Mit der Registrierung akzeptierst du unsere{" "}
+              <a href="https://www.ki-kanzlei.at/agb" target="_blank" rel="noopener noreferrer" className="text-primary font-medium hover:underline">Nutzungsbedingungen</a> und unsere{" "}
+              <a href="https://www.ki-kanzlei.at/datenschutz" target="_blank" rel="noopener noreferrer" className="text-primary font-medium hover:underline">Datenschutzerklärung</a>.
+              Daten werden ausschließlich in der EU (Frankfurt) verarbeitet.
+            </p>
+
+            <div className="flex items-start gap-2 my-4">
+              <Checkbox
+                id="optin"
+                checked={optIn}
+                onCheckedChange={(v) => setOptIn(v === true)}
+              />
+              <Label htmlFor="optin" className="text-[12.5px] font-normal cursor-pointer leading-snug">
+                Ich möchte über Produkt-Updates und Tipps informiert werden (optional)
+              </Label>
+            </div>
+
+            <Button type="submit" className="w-full h-10 gap-2" disabled={!canSubmit}>
+              {loading ? (
+                <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Account wird erstellt …</>
+              ) : (
+                <>Account erstellen <ArrowRight className="h-3.5 w-3.5" /></>
+              )}
+            </Button>
+          </form>
+        </div>
+
+        <FooterLinks />
+      </div>
+    </div>
+  );
+}
+
+function FooterLinks() {
+  return (
+    <div className="auth-form-footer">
+      <a href="https://www.ki-kanzlei.at/datenschutz" target="_blank" rel="noopener noreferrer">Datenschutz</a>
+      <span className="sep">·</span>
+      <a href="https://www.ki-kanzlei.at/agb" target="_blank" rel="noopener noreferrer">AGB</a>
+      <span className="sep">·</span>
+      <a href="https://www.ki-kanzlei.at/impressum" target="_blank" rel="noopener noreferrer">Impressum</a>
+      <span className="sep">·</span>
+      <span>© {new Date().getFullYear()} KI Kanzlei · ki-kanzlei.at</span>
+    </div>
+  );
 }

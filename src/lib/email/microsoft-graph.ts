@@ -68,6 +68,54 @@ async function getAccessToken(creds: GraphCredentials): Promise<string> {
   return accessToken;
 }
 
+export interface GraphInboundMessage {
+  fromEmail: string;
+  fromName: string | null;
+  subject: string | null;
+  text: string;
+  receivedAt: string;
+  messageId: string;
+}
+
+/**
+ * Holt die letzten eingehenden Mails aus dem Posteingang (für Reply-Sync).
+ */
+export async function fetchRecentInbound(
+  creds: GraphCredentials,
+  sinceISO: string,
+  limit = 30,
+): Promise<GraphInboundMessage[]> {
+  const accessToken = await getAccessToken(creds);
+  const url = new URL(
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(creds.senderEmail)}/mailFolders/inbox/messages`,
+  );
+  url.searchParams.set("$top", String(limit));
+  url.searchParams.set("$orderby", "receivedDateTime desc");
+  url.searchParams.set("$select", "from,subject,bodyPreview,receivedDateTime,internetMessageId");
+  url.searchParams.set("$filter", `receivedDateTime ge ${sinceISO}`);
+
+  const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Graph Inbox-Fehler: ${err.error?.message || `HTTP ${res.status}`}`);
+  }
+  const data = await res.json();
+  const items = (data.value ?? []) as Array<{
+    from?: { emailAddress?: { address?: string; name?: string } };
+    subject?: string; bodyPreview?: string; receivedDateTime?: string; internetMessageId?: string; id?: string;
+  }>;
+  return items
+    .map((m) => ({
+      fromEmail: (m.from?.emailAddress?.address || "").toLowerCase(),
+      fromName: m.from?.emailAddress?.name || null,
+      subject: m.subject || null,
+      text: m.bodyPreview || "",
+      receivedAt: m.receivedDateTime || new Date().toISOString(),
+      messageId: m.internetMessageId || m.id || "",
+    }))
+    .filter((m) => m.fromEmail);
+}
+
 /**
  * Sendet eine E-Mail über Microsoft Graph API.
  */

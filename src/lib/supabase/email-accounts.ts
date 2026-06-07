@@ -7,20 +7,27 @@ export interface EmailAccount {
   id: string;
   user_id: string;
   label: string;
-  provider: "smtp" | "microsoft_graph";
+  provider: "smtp" | "microsoft_graph" | "microsoft_oauth" | "google_oauth";
   sender_email: string;
   sender_name: string | null;
   reply_to: string | null;
+  /** Send-As: bei OAuth-Konten aus dieser freigegebenen (Shared-)Adresse senden. */
+  send_as_email: string | null;
   /* SMTP */
   smtp_host: string | null;
   smtp_port: number | null;
   smtp_username: string | null;
   smtp_password: string | null;
   smtp_encryption: "tls" | "ssl" | "none" | null;
-  /* Microsoft Graph */
+  /* Microsoft Graph (App-/Client-Credentials) */
   ms_tenant_id: string | null;
   ms_client_id: string | null;
   ms_client_secret: string | null;
+  /* OAuth-Login (delegiert — Microsoft/Google) */
+  oauth_access_token: string | null;
+  oauth_refresh_token: string | null;
+  oauth_token_expires_at: string | null;
+  oauth_scope: string | null;
   /* Limits & Rotation */
   daily_limit: number;
   is_active: boolean;
@@ -44,7 +51,7 @@ export interface EmailAccount {
 
 export type EmailAccountInsert = Pick<
   EmailAccount,
-  | "label" | "provider" | "sender_email" | "sender_name" | "reply_to"
+  | "label" | "provider" | "sender_email" | "sender_name" | "reply_to" | "send_as_email"
   | "smtp_host" | "smtp_port" | "smtp_username" | "smtp_password" | "smtp_encryption"
   | "ms_tenant_id" | "ms_client_id" | "ms_client_secret"
   | "daily_limit" | "is_active" | "priority"

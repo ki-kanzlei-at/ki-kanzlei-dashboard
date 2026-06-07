@@ -2,6 +2,10 @@
 
 import { createClient } from "./server";
 import { getSupabaseAdmin } from "./admin";
+import type { SendWindow } from "@/lib/campaigns/send-window";
+
+export type { SendWindow } from "@/lib/campaigns/send-window";
+export { DEFAULT_SEND_WINDOW, normalizeSendWindow, isWithinSendWindow } from "@/lib/campaigns/send-window";
 
 export interface LinkedInSenderProfile {
   name?: string;
@@ -13,7 +17,9 @@ export interface LinkedInSenderProfile {
 
 export interface LeadSettings {
   default_country?: string;
+  default_countries?: string[];
   default_status?: string;
+  default_industries?: string[];
   require_ceo?: boolean;
   require_email?: boolean;
   dedup?: boolean;
@@ -25,9 +31,15 @@ export interface LeadSettings {
 
 export interface CampaignSettings {
   daily_limit?: number;
+  /** Tages-Gesamtlimit über ALLE aktiven Postfächer (0/undefined = aus). */
+  total_daily_limit?: number;
   delay_minutes?: number;
+  /** Zufalls-Variation auf Pause & Follow-up-Timing in Prozent (0–50). */
+  send_jitter?: number;
   reply_to?: string;
-  send_window?: string;
+  /** Legacy: früher "business"|"extended"|"always"; jetzt strukturiertes Objekt.
+   *  String-Werte werden beim Laden/Im Cron migriert. */
+  send_window?: SendWindow | string;
   warmup?: boolean;
   warmup_start?: number;
   warmup_increment?: number;
@@ -35,6 +47,8 @@ export interface CampaignSettings {
   track_clicks?: boolean;
   unsub_link?: boolean;
   bounce_action?: string;
+  /** Anzahl Bounces (rollierend 7 Tage), ab der bounce_action greift. */
+  bounce_threshold?: number;
   signature?: string;
   /* Microsoft Graph E-Mail-Versand */
   ms_tenant_id?: string;
@@ -77,6 +91,18 @@ export interface BrandSettings {
   logo_svg?: string;
   logo_url?: string;
   tagline?: string;
+  /* Angebot / Positionierung — genutzt von AI Researcher (Produkt-Fit) & LinkedIn-Outreach */
+  offering?: string;        // Produkte & Dienstleistungen
+  value_prop?: string;      // Nutzenversprechen / USP
+  target_customer?: string; // Zielkunden / ICP
+  /* Onboarding-Profil */
+  business_type?: string;
+  team_size?: string;
+  role?: string;            // founder | marketing | sales | ops | other
+  primary_goal?: string;    // demos | pipeline | customers | investors | talent
+  monthly_volume?: string;  // lt500 | 500-2500 | 2500-10000 | gt10000
+  plan_intent?: string;     // starter | growth | pro | enterprise | later
+  plan_selected_at?: string;
 }
 
 export interface UserSettings {

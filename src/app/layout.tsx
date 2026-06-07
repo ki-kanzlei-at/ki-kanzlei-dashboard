@@ -3,6 +3,7 @@ import { Poppins } from "next/font/google";
 import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
+import { ThemeProvider } from "@/components/ThemeProvider";
 
 const poppins = Poppins({
   subsets: ["latin"],
@@ -33,12 +34,14 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="de" className={poppins.variable}>
+    <html lang="de" className={poppins.variable} suppressHydrationWarning>
       <body className="antialiased min-h-screen font-sans">
-        <TooltipProvider delayDuration={300}>
-          {children}
-          <Toaster position="bottom-right" />
-        </TooltipProvider>
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
+          <TooltipProvider delayDuration={300}>
+            {children}
+            <Toaster position="top-center" />
+          </TooltipProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

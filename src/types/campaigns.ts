@@ -1,13 +1,47 @@
 /* ── Campaign Typen ── */
 
-export type CampaignStatus = "draft" | "active" | "paused" | "completed";
-export type CampaignLeadStatus = "pending" | "sent" | "failed" | "opened" | "bounced" | "replied";
+export type CampaignStatus = "draft" | "active" | "paused" | "completed" | "archived";
+export type CampaignLeadStatus =
+  | "pending"
+  | "sent"
+  | "failed"
+  | "opened"
+  | "bounced"
+  | "replied"
+  | "completed";
 
-/* Aktivitätstyp für die "Letzte Aktivität"-Spalte.
- * Backend kann diesen Wert später aus dem letzten campaign_lead-Event ableiten. */
 export type CampaignActivityKind =
-  | "reply" | "open" | "send" | "pause" | "completed" | "draft";
+  | "reply" | "open" | "send" | "pause" | "completed" | "draft" | "click";
 
+export type CampaignTone = "formal" | "professional" | "casual";
+
+/* ── Wizard sub-shapes (persisted as JSONB) ──────────────────── */
+export interface SequenceStep {
+  id: string;
+  intent: string;
+  desc: string;
+}
+
+export interface SequenceDelay {
+  value: number;
+  unit: "day";
+}
+
+export interface CampaignSchedule {
+  days: boolean[];          // length 7, Mo..So
+  time_from: string;        // "09:00"
+  time_to: string;          // "17:00"
+  timezone: string;         // "Europe/Vienna"
+  gap_seconds: number;      // 180 default
+}
+
+export interface CampaignTracking {
+  opens: boolean;
+  clicks: boolean;
+  replies: boolean;
+}
+
+/* ── Hauptobjekt ─────────────────────────────────────────────── */
 export interface Campaign {
   id: string;
   user_id: string;
@@ -17,8 +51,10 @@ export interface Campaign {
   sent_count: number;
   failed_count: number;
   open_count: number;
+  click_count: number;
   bounce_count: number;
   reply_count: number;
+  conversion_count: number;
   daily_limit: number;
   delay_minutes: number;
   reply_to: string;
@@ -28,21 +64,71 @@ export interface Campaign {
   completed_at: string | null;
   error_message: string | null;
 
-  /* Backend-optionale Felder (UI-ready, später vom API zu liefern) */
-  goal?: string | null;
-  steps?: number | null;
-  sender_name?: string | null;
+  /* ── Wizard fields (new) ── */
+  mailbox_id: string | null;
+  sender_name: string | null;
   sender_email?: string | null;
-  conversion_count?: number | null;
-  last_activity_at?: string | null;
-  last_activity_kind?: CampaignActivityKind | null;
+  goal: string | null;
+  language: string;
+  tone: CampaignTone;
+  system_prompt: string | null;
+  sequence_steps: SequenceStep[];
+  sequence_delays: SequenceDelay[];
+  schedule: CampaignSchedule;
+  tracking: CampaignTracking;
+  auto_stop_on_reply: boolean;
+  steps_total: number;
+  last_activity_at: string | null;
+  last_activity_kind: CampaignActivityKind | null;
+
+  /* legacy alias kept for UI */
+  steps?: number | null;
 }
 
-export type CampaignInsert = Pick<Campaign, "name" | "daily_limit" | "delay_minutes" | "reply_to"> & {
+export interface CampaignInsert {
+  /* required */
+  name: string;
   lead_ids: string[];
-};
+  /* optional / wizard */
+  daily_limit?: number;
+  delay_minutes?: number;
+  reply_to?: string;
+  mailbox_id?: string | null;
+  sender_name?: string | null;
+  goal?: string | null;
+  language?: string;
+  tone?: CampaignTone;
+  system_prompt?: string | null;
+  sequence_steps?: SequenceStep[];
+  sequence_delays?: SequenceDelay[];
+  schedule?: Partial<CampaignSchedule>;
+  tracking?: Partial<CampaignTracking>;
+  auto_stop_on_reply?: boolean;
+  status?: CampaignStatus;
+}
 
-export type CampaignUpdate = Partial<Pick<Campaign, "name" | "status" | "daily_limit" | "delay_minutes" | "reply_to" | "error_message">>;
+export type CampaignUpdate = Partial<
+  Pick<
+    Campaign,
+    | "name"
+    | "status"
+    | "daily_limit"
+    | "delay_minutes"
+    | "reply_to"
+    | "error_message"
+    | "mailbox_id"
+    | "sender_name"
+    | "goal"
+    | "language"
+    | "tone"
+    | "system_prompt"
+    | "sequence_steps"
+    | "sequence_delays"
+    | "schedule"
+    | "tracking"
+    | "auto_stop_on_reply"
+  >
+>;
 
 export interface CampaignLead {
   id: string;
@@ -55,9 +141,14 @@ export interface CampaignLead {
   email_text: string | null;
   sender_email: string | null;
   sent_at: string | null;
+  last_sent_at: string | null;
+  next_send_at: string | null;
+  step_index: number;
   open_count: number;
   first_opened_at: string | null;
   last_opened_at: string | null;
+  clicked_count: number;
+  first_clicked_at: string | null;
   bounced_at: string | null;
   bounce_type: string | null;
   replied_at: string | null;
@@ -68,5 +159,23 @@ export interface CampaignLead {
     company: string;
     email: string | null;
     ceo_name: string | null;
+    website?: string | null;
+    city?: string | null;
+    industry?: string | null;
   };
 }
+
+/* ── Defaults für Wizard-Insert ───────────────────────────────── */
+export const DEFAULT_SCHEDULE: CampaignSchedule = {
+  days: [true, true, true, true, true, false, false],
+  time_from: "09:00",
+  time_to: "17:00",
+  timezone: "Europe/Vienna",
+  gap_seconds: 180,
+};
+
+export const DEFAULT_TRACKING: CampaignTracking = {
+  opens: true,
+  clicks: true,
+  replies: true,
+};

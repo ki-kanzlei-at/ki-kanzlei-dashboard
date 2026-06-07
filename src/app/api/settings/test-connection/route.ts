@@ -200,7 +200,7 @@ async function testWebhook(url: string): Promise<{ ok: boolean; error?: string }
 
 async function testConnectSafely(apiKey: string): Promise<{ ok: boolean; error?: string; accountId?: string; accountName?: string; plan?: string }> {
   try {
-    const res = await fetch("https://api.connectsafely.ai/account/status", {
+    const res = await fetch("https://api.connectsafely.ai/linkedin/account/status", {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",

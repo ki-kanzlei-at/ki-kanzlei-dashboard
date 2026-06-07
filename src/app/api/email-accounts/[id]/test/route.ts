@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getEmailAccountById, updateEmailAccount } from "@/lib/supabase/email-accounts";
 import { testConnection as testGraph } from "@/lib/email/microsoft-graph";
 import { testConnection as testSmtp } from "@/lib/email/smtp";
+import { testMicrosoftOAuth } from "@/lib/email/microsoft-oauth";
+import { testGoogleOAuth } from "@/lib/email/google-oauth";
 
 export async function POST(
   _request: NextRequest,
@@ -22,6 +24,14 @@ export async function POST(
     let result: { ok: boolean; error?: string };
 
     switch (account.provider) {
+      case "microsoft_oauth": {
+        result = await testMicrosoftOAuth(account);
+        break;
+      }
+      case "google_oauth": {
+        result = await testGoogleOAuth(account);
+        break;
+      }
       case "microsoft_graph": {
         if (!account.ms_tenant_id || !account.ms_client_id || !account.ms_client_secret) {
           return NextResponse.json({ data: { ok: false, error: "Credentials unvollständig" } });

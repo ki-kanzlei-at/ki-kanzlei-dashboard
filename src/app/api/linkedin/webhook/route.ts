@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { recordMessage } from "@/lib/inbox/store";
 
 const MAX_TIMESTAMP_SKEW_S = 5 * 60; // 5 Minuten Replay-Window
 
@@ -94,32 +95,35 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
   }
 
-  // Falls noch nicht verifiziert: Per-User-Secret via accountId nachladen
-  if (!signatureOk && body.accountId) {
-    const admin = getSupabaseAdmin();
+  // Per-User-Secret via accountId nachladen + Tenant (user_id) auflösen, um die
+  // Lead-Suche unten auf den richtigen Mandanten zu beschränken.
+  const admin = getSupabaseAdmin();
+  let scopeUserId: string | null = null;
+  if (body.accountId) {
     const { data: settings } = await admin
       .from("user_settings")
-      .select("connectsafely_webhook_secret")
+      .select("user_id, connectsafely_webhook_secret")
       .eq("connectsafely_account_id", body.accountId)
       .maybeSingle();
-    const perUserSecret = settings?.connectsafely_webhook_secret as string | null;
-    if (perUserSecret) {
+    scopeUserId = (settings as { user_id?: string } | null)?.user_id ?? null;
+    const perUserSecret = (settings as { connectsafely_webhook_secret?: string } | null)?.connectsafely_webhook_secret ?? null;
+    if (!signatureOk && perUserSecret) {
       const v = verifySignature(rawBody, sig, ts, perUserSecret);
       signatureOk = v.ok;
     }
   }
 
-  // Kein gültiges Secret → 401, AUSSER wir laufen im Dev-Mode ohne Secret
+  // Kein gültiges Secret → 401. Unsignierte Events NUR mit explizitem Opt-in
+  // (ALLOW_UNSIGNED_WEBHOOKS=true) — niemals auf erreichbaren Deployments setzen.
   if (!signatureOk) {
-    if (!fallbackSecret && process.env.NODE_ENV !== "production") {
-      console.warn("[ConnectSafely webhook] No secret configured — accepting unsigned event (DEV only)");
+    if (process.env.ALLOW_UNSIGNED_WEBHOOKS === "true") {
+      console.warn("[ConnectSafely webhook] ALLOW_UNSIGNED_WEBHOOKS=true — accepting UNSIGNED event");
     } else {
       return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
     }
   }
 
   // 3. Event-Routing
-  const admin = getSupabaseAdmin();
 
   if (body.event === "message.received") {
     // Sender-Identifier kann profileUrn oder profileId sein
@@ -133,21 +137,20 @@ export async function POST(request: NextRequest) {
 
     // Suche Lead in linkedin_id (das speichert unterschiedlich URN, slug oder memberId)
     const idents = [senderUrn, senderId, senderMember].filter(Boolean) as string[];
-    const { data: leads } = await admin
-      .from("linkedin_leads")
-      .select("id, status, linkedin_url, linkedin_id")
-      .in("linkedin_id", idents)
-      .limit(5);
+    const LEAD_COLS = "id, user_id, status, linkedin_url, linkedin_id, full_name, company, headline, profile_picture_url";
+    let q = admin.from("linkedin_leads").select(LEAD_COLS).in("linkedin_id", idents);
+    if (scopeUserId) q = q.eq("user_id", scopeUserId); // auf den Mandanten des accountId beschränken
+    const { data: leads } = await q.limit(5);
 
     let target = leads?.[0];
-    // Fallback: suche über URL-Pattern wenn nur profileId vorhanden
+    // Fallback: über die /in/<slug>-URL — verankert + LIKE-Metazeichen escaped,
+    // und nur bei EINDEUTIGEM Treffer (sonst lieber nichts als falsche Person).
     if (!target && senderId) {
-      const { data: byUrl } = await admin
-        .from("linkedin_leads")
-        .select("id, status, linkedin_url, linkedin_id")
-        .ilike("linkedin_url", `%${senderId}%`)
-        .limit(1);
-      target = byUrl?.[0];
+      const safe = senderId.replace(/[%_\\]/g, "\\$&");
+      let fq = admin.from("linkedin_leads").select(LEAD_COLS).ilike("linkedin_url", `%/in/${safe}%`);
+      if (scopeUserId) fq = fq.eq("user_id", scopeUserId);
+      const { data: byUrl } = await fq.limit(2);
+      if (byUrl && byUrl.length === 1) target = byUrl[0];
     }
 
     if (!target) {
@@ -169,6 +172,35 @@ export async function POST(request: NextRequest) {
     }
 
     await admin.from("linkedin_leads").update(updates).eq("id", target.id);
+
+    // Eingehende Antwort in die Inbox schreiben → Conversation erscheint (has_inbound).
+    const replyText = typeof body.data?.body === "string" ? body.data.body : "";
+    if (replyText.trim()) {
+      try {
+        await recordMessage(admin, {
+          userId: target.user_id,
+          channel: "linkedin",
+          direction: "in",
+          linkedinLeadId: target.id,
+          contactName: target.full_name || body.data?.sender?.name || "Unbekannt",
+          contactCompany: target.company ?? null,
+          contactRole: target.headline ?? null,
+          linkedinUrl: target.linkedin_url ?? null,
+          avatarUrl: target.profile_picture_url ?? null,
+          externalThreadId: body.data?.conversationUrn ?? null,
+          fromName: body.data?.sender?.name || target.full_name || null,
+          body: replyText,
+          // Dedupe: messageId, sonst stabiler Fallback (Thread + Zeit) gegen Webhook-Retries.
+          externalId: body.data?.messageId
+            || (body.data?.conversationUrn ? `${body.data.conversationUrn}:${body.data?.sentAt ?? now}` : null),
+          sentAt: body.data?.sentAt ?? now,
+          status: "interested",
+        });
+      } catch (e) {
+        console.error("[ConnectSafely webhook] Inbox-Persist fehlgeschlagen", e);
+      }
+    }
+
     return NextResponse.json({ ok: true, matched: 1, leadId: target.id });
   }
 

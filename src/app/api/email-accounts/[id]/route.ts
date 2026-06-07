@@ -31,6 +31,7 @@ export async function PATCH(
     if (body.sender_email !== undefined) updates.sender_email = sanitize(body.sender_email, 254);
     if (body.sender_name !== undefined) updates.sender_name = sanitize(body.sender_name, 256) || null;
     if (body.reply_to !== undefined) updates.reply_to = sanitize(body.reply_to, 254) || null;
+    if (body.send_as_email !== undefined) updates.send_as_email = sanitize(body.send_as_email, 254) || null;
     if (body.smtp_host !== undefined) updates.smtp_host = sanitize(body.smtp_host, 256) || null;
     if (body.smtp_port !== undefined) updates.smtp_port = Number(body.smtp_port) || 587;
     if (body.smtp_username !== undefined) updates.smtp_username = sanitize(body.smtp_username) || null;

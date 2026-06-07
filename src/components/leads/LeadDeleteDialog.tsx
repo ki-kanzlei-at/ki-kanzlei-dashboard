@@ -103,7 +103,8 @@ export function LeadDeleteDialog({
             Abbrechen
           </AlertDialogCancel>
           <AlertDialogAction
-            variant="destructive"
+            variant="outline"
+            className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
             onClick={(e) => {
               e.preventDefault();
               handleDelete();

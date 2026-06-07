@@ -3,9 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import {
-  Plus, Trash2, TestTube, Loader2, CheckCircle2, XCircle, Mail,
-  EyeIcon, EyeOffIcon, Power, PowerOff, Flame, Shield, ShieldCheck,
-  ShieldAlert, ArrowRight, ArrowLeft, Settings2, Pencil, Globe,
+  Plus, Loader2, CheckCircle2, XCircle, Mail,
+  EyeIcon, EyeOffIcon, Flame, Shield, ShieldCheck,
+  ShieldAlert, ArrowRight, ArrowLeft, Settings2, Globe, MoreHorizontal,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -16,24 +16,32 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Progress } from "@/components/ui/progress";
 import {
-  Card, CardContent, CardDescription, CardHeader, CardTitle,
-} from "@/components/ui/card";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
 import {
+  Accordion, AccordionItem, AccordionTrigger, AccordionContent,
+} from "@/components/ui/accordion";
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { MailboxSetupGuide, type SetupKind } from "./MailboxSetupGuide";
 
 /* ── Types ── */
 interface EmailAccount {
   id: string;
   label: string;
-  provider: "smtp" | "microsoft_graph";
+  provider: "smtp" | "microsoft_graph" | "microsoft_oauth" | "google_oauth";
   sender_email: string;
   sender_name: string | null;
   reply_to: string | null;
+  send_as_email: string | null;
   smtp_host: string | null;
   smtp_port: number | null;
   smtp_username: string | null;
@@ -63,14 +71,15 @@ interface DnsResult {
   overall: "good" | "warning" | "bad";
 }
 
-type WizardStep = "provider" | "credentials" | "dns" | "limits";
+type WizardStep = "provider" | "guide" | "credentials" | "dns" | "limits";
 
 type FormData = {
   label: string;
-  provider: "smtp" | "microsoft_graph";
+  provider: "smtp" | "microsoft_graph" | "microsoft_oauth" | "google_oauth";
   sender_email: string;
   sender_name: string;
   reply_to: string;
+  send_as_email: string;
   smtp_host: string;
   smtp_port: number;
   smtp_username: string;
@@ -87,14 +96,14 @@ type FormData = {
 };
 
 const EMPTY_FORM: FormData = {
-  label: "", provider: "smtp", sender_email: "", sender_name: "", reply_to: "",
+  label: "", provider: "smtp", sender_email: "", sender_name: "", reply_to: "", send_as_email: "",
   smtp_host: "", smtp_port: 587, smtp_username: "", smtp_password: "", smtp_encryption: "tls",
   ms_tenant_id: "", ms_client_id: "", ms_client_secret: "",
   daily_limit: 50, is_active: true, warmup_enabled: true, warmup_start: 10, warmup_increment: 5,
 };
 
 const healthColor: Record<string, string> = { good: "bg-green-500", warning: "bg-amber-500", bad: "bg-red-500", unknown: "bg-gray-400" };
-const healthLabel: Record<string, string> = { good: "Aktiv", warning: "Warnung", bad: "Fehler", unknown: "Nicht getestet" };
+const healthLabel: Record<string, string> = { good: "Verbunden", warning: "Warnung", bad: "Fehler", unknown: "Nicht getestet" };
 
 /* ── Provider Icons (inline SVGs statt Image für Zuverlässigkeit) ── */
 function GoogleIcon() {
@@ -119,10 +128,19 @@ function MicrosoftIcon() {
   );
 }
 
+/* Provider-Logo-Kachel für die Konto-Liste (echte Logos, dezent). */
+function MailboxLogo({ provider }: { provider: EmailAccount["provider"] }) {
+  const tile = "flex size-9 shrink-0 items-center justify-center rounded-lg border [&_svg]:size-5";
+  if (provider === "google_oauth") return <span className={`${tile} bg-white`}><GoogleIcon /></span>;
+  if (provider === "microsoft_oauth" || provider === "microsoft_graph") return <span className={`${tile} bg-white`}><MicrosoftIcon /></span>;
+  return <span className={`${tile} bg-muted text-muted-foreground`}><Mail /></span>;
+}
+
 export default function EmailAccountsManager() {
   const [accounts, setAccounts] = useState<EmailAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<FormData>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -131,6 +149,7 @@ export default function EmailAccountsManager() {
 
   // Wizard state
   const [wizardStep, setWizardStep] = useState<WizardStep>("provider");
+  const [setupKind, setSetupKind] = useState<SetupKind>("smtp");
   const [autoDetecting, setAutoDetecting] = useState(false);
   const [detectedProvider, setDetectedProvider] = useState<string | null>(null);
   const [showAdvancedSmtp, setShowAdvancedSmtp] = useState(false);
@@ -138,6 +157,13 @@ export default function EmailAccountsManager() {
   const [dnsLoading, setDnsLoading] = useState(false);
   const [connTestResult, setConnTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
   const [connTesting, setConnTesting] = useState(false);
+
+  // Setup-Guide (zum späteren Nachschlagen)
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [guideKind, setGuideKind] = useState<SetupKind>("smtp");
+
+  // Test-E-Mail
+  const [sendingTest, setSendingTest] = useState(false);
 
   const loadAccounts = useCallback(async () => {
     try {
@@ -151,6 +177,23 @@ export default function EmailAccountsManager() {
 
   useEffect(() => { loadAccounts(); }, [loadAccounts]);
 
+  // OAuth-Rücksprung ("Mit Microsoft anmelden") auswerten.
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const connected = sp.get("connected");
+    const oauthError = sp.get("oauth_error");
+    if (!connected && !oauthError) return;
+    if (connected) {
+      const label = connected === "google" ? "Google" : connected === "microsoft" ? "Microsoft" : connected;
+      toast.success(`${label}-Konto verbunden`);
+      loadAccounts();
+    }
+    if (oauthError) toast.error(oauthError);
+    sp.delete("connected"); sp.delete("oauth_error");
+    const q = sp.toString();
+    window.history.replaceState(null, "", window.location.pathname + (q ? `?${q}` : ""));
+  }, [loadAccounts]);
+
   function openCreate() {
     setForm(EMPTY_FORM);
     setEditId(null);
@@ -162,11 +205,11 @@ export default function EmailAccountsManager() {
     setDialogOpen(true);
   }
 
-  function openEdit(acc: EmailAccount) {
+  function openSettings(acc: EmailAccount) {
     setForm({
       label: acc.label, provider: acc.provider,
       sender_email: acc.sender_email, sender_name: acc.sender_name ?? "",
-      reply_to: acc.reply_to ?? "",
+      reply_to: acc.reply_to ?? "", send_as_email: acc.send_as_email ?? "",
       smtp_host: acc.smtp_host ?? "", smtp_port: acc.smtp_port ?? 587,
       smtp_username: acc.smtp_username ?? "", smtp_password: acc.smtp_password ?? "",
       smtp_encryption: acc.smtp_encryption ?? "tls",
@@ -177,18 +220,15 @@ export default function EmailAccountsManager() {
       warmup_increment: acc.warmup_increment,
     });
     setEditId(acc.id);
-    setWizardStep("credentials");
-    setShowAdvancedSmtp(true);
-    setDnsResult(null);
-    setConnTestResult(null);
-    setDialogOpen(true);
+    setSettingsOpen(true);
   }
 
   function selectProvider(provider: "smtp" | "microsoft_graph") {
+    // SMTP/Custom: direkt zu den Feldern; erweiterte Einstellungen bleiben eingeklappt.
     setForm((f) => ({ ...f, provider }));
-    setWizardStep("credentials");
     setShowAdvancedSmtp(false);
     setConnTestResult(null);
+    setWizardStep("credentials");
   }
 
   /* ── Auto-Detect SMTP ── */
@@ -275,21 +315,31 @@ export default function EmailAccountsManager() {
       const payload = { ...form, label: form.label || form.sender_email };
       const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!res.ok) { const j = await res.json().catch(() => null); throw new Error(j?.error ?? "Fehler"); }
+      const { data: saved } = await res.json();
+      // Liste sofort aktualisieren (kein Reload nötig)
+      if (saved?.id) {
+        setAccounts((list) => editId
+          ? list.map((a) => a.id === saved.id ? { ...a, ...saved } : a)
+          : [...list, saved as EmailAccount]);
+      }
       toast.success(editId ? "Konto aktualisiert" : "Konto erstellt");
       setDialogOpen(false);
-      loadAccounts();
+      setSettingsOpen(false);
     } catch (err) { toast.error(err instanceof Error ? err.message : "Fehler"); }
     finally { setSaving(false); }
   }
 
   async function handleDelete(id: string) {
     if (!confirm("E-Mail-Konto wirklich löschen?")) return;
+    const prev = accounts;
+    setAccounts((list) => list.filter((a) => a.id !== id)); // optimistisch entfernen — Zeile verschwindet sofort, kein Toast
     try {
       const res = await fetch(`/api/email-accounts/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error();
-      toast.success("Konto gelöscht");
-      loadAccounts();
-    } catch { toast.error("Fehler beim Löschen"); }
+    } catch {
+      setAccounts(prev); // rückgängig
+      toast.error("Fehler beim Löschen");
+    }
   }
 
   async function handleTest(id: string) {
@@ -297,21 +347,45 @@ export default function EmailAccountsManager() {
     try {
       const res = await fetch(`/api/email-accounts/${id}/test`, { method: "POST" });
       const { data } = await res.json();
+      // Ergebnis sofort in die Liste schreiben (Status-Spalte aktualisiert instant)
+      setAccounts((list) => list.map((a) => a.id === id ? {
+        ...a,
+        health_status: data?.ok ? "good" : "bad",
+        last_error: data?.ok ? null : (data?.error ?? "Verbindung fehlgeschlagen"),
+      } : a));
       if (data?.ok) toast.success("Verbindung erfolgreich");
       else toast.error(data?.error ?? "Verbindung fehlgeschlagen");
-      loadAccounts();
     } catch { toast.error("Testfehler"); }
     finally { setTesting(null); }
   }
 
   async function handleToggleActive(id: string, isActive: boolean) {
+    const prev = accounts;
+    setAccounts((list) => list.map((a) => a.id === id ? { ...a, is_active: !isActive } : a)); // optimistisch
     try {
-      await fetch(`/api/email-accounts/${id}`, {
+      const res = await fetch(`/api/email-accounts/${id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_active: !isActive }),
       });
-      loadAccounts();
-    } catch { toast.error("Fehler"); }
+      if (!res.ok) throw new Error();
+    } catch {
+      setAccounts(prev); // rückgängig
+      toast.error("Status konnte nicht geändert werden");
+    }
+  }
+
+  // Echte Test-E-Mail an die eigene Login-Adresse senden (beweist End-to-End-Versand).
+  async function handleSendTest() {
+    if (!editId) return;
+    setSendingTest(true);
+    try {
+      const res = await fetch(`/api/email-accounts/${editId}/send-test`, { method: "POST" });
+      const json = await res.json().catch(() => null);
+      const result = json?.data;
+      if (res.ok && result?.ok) toast.success(result.to ? `Test-E-Mail an ${result.to} gesendet` : "Test-E-Mail gesendet");
+      else toast.error(result?.error || json?.error || "Test-E-Mail fehlgeschlagen");
+    } catch { toast.error("Test-E-Mail fehlgeschlagen"); }
+    finally { setSendingTest(false); }
   }
 
   const toggleSecret = (key: string) => setShowSecrets((s) => ({ ...s, [key]: !s[key] }));
@@ -319,82 +393,157 @@ export default function EmailAccountsManager() {
   const totalDailyCapacity = accounts.filter((a) => a.is_active).reduce((sum, a) => sum + a.daily_limit, 0);
   const totalSentToday = accounts.reduce((sum, a) => sum + a.sent_today, 0);
 
-  const stepIndex = { provider: 0, credentials: 1, dns: 2, limits: 3 };
-  const stepProgress = ((stepIndex[wizardStep] + 1) / 4) * 100;
+  // Fortschritt nur im SMTP-Mehrschritt-Flow — Google/Microsoft sind 1-Klick (kein Balken).
+  const smtpFlow: WizardStep[] = ["credentials", "dns", "limits"];
+  const smtpPos = smtpFlow.indexOf(wizardStep);
+  const stepProgress = smtpPos >= 0 ? ((smtpPos + 1) / smtpFlow.length) * 100 : 0;
 
   if (loading) return null;
 
   return (
-    <Card className="shadow-xs">
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2"><Mail className="size-5" /> E-Mail-Konten</CardTitle>
-            <CardDescription className="mt-1">
-              Mehrere Konten & Domains für automatische Rotation beim Kampagnenversand.
-            </CardDescription>
-          </div>
-          <Button onClick={openCreate} size="sm"><Plus className="mr-1 size-4" /> Konto hinzufügen</Button>
+    <div>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-[15px] font-semibold tracking-tight">Postfächer</h2>
+          <p className="mt-0.5 text-[13px] leading-relaxed text-muted-foreground">
+            Mehrere Konten &amp; Domains für automatische Rotation beim Kampagnenversand.
+          </p>
         </div>
-        {accounts.length > 0 && (
-          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-sm text-muted-foreground">
-            <span>{accounts.filter((a) => a.is_active).length} aktiv von {accounts.length}</span>
-            <span>Kapazität: {totalDailyCapacity} / Tag</span>
-            <span>Heute: {totalSentToday}</span>
-          </div>
-        )}
-      </CardHeader>
-      <CardContent>
+        <Button onClick={openCreate} size="sm"><Plus className="mr-1 size-4" /> Konto hinzufügen</Button>
+      </div>
+      {accounts.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <span>{accounts.filter((a) => a.is_active).length} aktiv von {accounts.length}</span>
+          <span>Kapazität: {totalDailyCapacity} / Tag</span>
+          <span>Heute: {totalSentToday}</span>
+        </div>
+      )}
+      <div className="mt-4">
         {accounts.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            <Mail className="mx-auto size-10 mb-3 opacity-40" />
-            <p className="font-medium">Noch keine E-Mail-Konten</p>
-            <p className="text-sm mt-1">Füge mindestens ein Konto hinzu, um Kampagnen zu versenden.</p>
-            <Button onClick={openCreate} className="mt-4"><Plus className="mr-1 size-4" /> Erstes Konto verbinden</Button>
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-14 text-center">
+            <span className="flex size-11 items-center justify-center rounded-xl border bg-muted/40 text-muted-foreground">
+              <Mail className="size-5" />
+            </span>
+            <p className="mt-4 text-sm font-medium text-foreground">Noch keine E-Mail-Konten</p>
+            <p className="mt-1 max-w-xs text-[13px] text-muted-foreground">Füge mindestens ein Konto hinzu, um Kampagnen zu versenden.</p>
+            <Button onClick={openCreate} size="sm" className="mt-5"><Plus className="mr-1 size-4" /> Erstes Konto verbinden</Button>
           </div>
         ) : (
-          <div className="space-y-3">
-            {accounts.map((acc) => (
-              <div key={acc.id} className={`flex items-center gap-4 rounded-lg border p-4 transition-colors ${acc.is_active ? "" : "opacity-50"}`}>
-                <div className={`size-3 rounded-full shrink-0 ${healthColor[acc.health_status]}`} title={healthLabel[acc.health_status]} />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium truncate">{acc.label}</span>
-                    <Badge variant="outline" className="text-xs shrink-0">
-                      {acc.provider === "smtp" ? "SMTP" : "Microsoft 365"}
-                    </Badge>
-                    {acc.warmup_enabled && (
-                      <Badge variant="secondary" className="text-xs shrink-0">
-                        <Flame className="size-3 mr-1" /> Tag {acc.warmup_day}
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="text-sm text-muted-foreground truncate mt-0.5">{acc.sender_email}</div>
-                  <div className="flex gap-3 text-xs text-muted-foreground mt-1">
-                    <span>{acc.sent_today} / {acc.daily_limit} heute</span>
-                    <span>{acc.total_sent} gesamt</span>
-                    {acc.last_error && <span className="text-destructive truncate max-w-48" title={acc.last_error}>{acc.last_error}</span>}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <Button variant="ghost" size="icon" onClick={() => handleTest(acc.id)} disabled={testing === acc.id} title="Testen">
-                    {testing === acc.id ? <Loader2 className="size-4 animate-spin" /> : <TestTube className="size-4" />}
-                  </Button>
-                  <Button variant="ghost" size="icon" onClick={() => handleToggleActive(acc.id, acc.is_active)} title={acc.is_active ? "Deaktivieren" : "Aktivieren"}>
-                    {acc.is_active ? <Power className="size-4 text-green-600" /> : <PowerOff className="size-4" />}
-                  </Button>
-                  <Button variant="ghost" size="icon" onClick={() => openEdit(acc)} title="Bearbeiten"><Pencil className="size-4" /></Button>
-                  <Button variant="ghost" size="icon" onClick={() => handleDelete(acc.id)} title="Löschen" className="text-destructive hover:text-destructive"><Trash2 className="size-4" /></Button>
-                </div>
-              </div>
-            ))}
+          <div className="overflow-hidden rounded-xl border">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="w-[64px] pl-4">Aktiv</TableHead>
+                  <TableHead>Postfach</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="hidden md:table-cell text-right">Heute</TableHead>
+                  <TableHead className="w-[80px] pr-4 text-right">Aktionen</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {accounts.map((acc) => {
+                  const providerLabel = acc.provider === "smtp" ? "SMTP" : acc.provider === "google_oauth" ? "Google" : "Microsoft 365";
+                  // Status spiegelt zuerst den Aktiv-Zustand: deaktiviert → „Pausiert" (nie „Verbunden").
+                  const statusDot = !acc.is_active ? "bg-muted-foreground/40" : healthColor[acc.health_status];
+                  const statusText = testing === acc.id ? "Teste…" : !acc.is_active ? "Pausiert" : healthLabel[acc.health_status];
+                  return (
+                    <TableRow key={acc.id} className={acc.is_active ? "" : "opacity-55"}>
+                      {/* Aktiv-Switch — klar ersichtlich */}
+                      <TableCell className="pl-4">
+                        <Switch
+                          checked={acc.is_active}
+                          onCheckedChange={() => handleToggleActive(acc.id, acc.is_active)}
+                          aria-label={acc.is_active ? "Deaktivieren" : "Aktivieren"}
+                        />
+                      </TableCell>
+
+                      {/* Postfach: Logo + E-Mail + Provider */}
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <MailboxLogo provider={acc.provider} />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="truncate text-sm font-medium">{acc.sender_email}</span>
+                              {!acc.is_active && (
+                                <Badge variant="outline" className="shrink-0 px-1.5 text-[10px] text-muted-foreground">Inaktiv</Badge>
+                              )}
+                              {acc.warmup_enabled && (
+                                <Badge variant="secondary" className="shrink-0 gap-1 px-1.5 text-[10px]">
+                                  <Flame className="size-2.5" /> Warmup
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+                              <span>{providerLabel}</span>
+                              {acc.last_error && (
+                                <>
+                                  <span className="text-muted-foreground/40">·</span>
+                                  <span className="max-w-40 truncate text-destructive" title={acc.last_error}>{acc.last_error}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </TableCell>
+
+                      {/* Status — immer sichtbar; bei deaktiviert „Pausiert" */}
+                      <TableCell>
+                        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                          <span className={`size-1.5 rounded-full ${statusDot}`} />
+                          {statusText}
+                        </span>
+                      </TableCell>
+
+                      {/* Heute / Limit */}
+                      <TableCell className="hidden md:table-cell text-right tabular-nums text-[12.5px] text-muted-foreground">
+                        {acc.sent_today} / {acc.daily_limit}
+                      </TableCell>
+
+                      {/* Aktionen — 3-Punkte-Menü */}
+                      <TableCell className="pr-4 text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="size-8" title="Aktionen">
+                              {testing === acc.id ? <Loader2 className="size-4 animate-spin" /> : <MoreHorizontal className="size-4" />}
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem onClick={() => handleTest(acc.id)} disabled={testing === acc.id}>
+                              Verbindung testen
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleToggleActive(acc.id, acc.is_active)}>
+                              {acc.is_active ? "Deaktivieren" : "Aktivieren"}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openSettings(acc)}>
+                              Einstellungen
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => handleDelete(acc.id)} className="text-destructive focus:text-destructive">
+                              Löschen
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
           </div>
         )}
-      </CardContent>
+      </div>
+
+      {/* Setup-Guide zum Nachschlagen */}
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed px-3.5 py-2.5">
+        <p className="text-[12.5px] text-muted-foreground">Brauchst du Hilfe bei der Einrichtung deines Postfachs?</p>
+        <Button variant="ghost" size="sm" className="text-primary hover:text-primary" onClick={() => setGuideOpen(true)}>
+          Einrichtungs-Anleitung öffnen
+        </Button>
+      </div>
 
       {/* ══════════ WIZARD DIALOG ══════════ */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto p-0">
+        <DialogContent className="sm:max-w-[1040px] max-h-[90vh] overflow-y-auto p-0">
           {/* Progress */}
           <div className="px-6 pt-6 pb-2">
             <DialogHeader>
@@ -402,13 +551,14 @@ export default function EmailAccountsManager() {
                 {editId ? "E-Mail-Konto bearbeiten" : "E-Mail-Konto verbinden"}
               </DialogTitle>
               <DialogDescription>
-                {wizardStep === "provider" && "Wähle deinen E-Mail-Provider."}
-                {wizardStep === "credentials" && "Gib deine Zugangsdaten ein."}
-                {wizardStep === "dns" && "Prüfe deine Domain-Konfiguration."}
-                {wizardStep === "limits" && "Sendelimit & Warmup einstellen."}
+                {wizardStep === "provider" && "Provider wählen."}
+                {wizardStep === "guide" && "So holst du deine Zugangsdaten."}
+                {wizardStep === "credentials" && "Nur das Nötigste eingeben."}
+                {wizardStep === "dns" && "Domain prüfen (optional)."}
+                {wizardStep === "limits" && "Sendelimit & Warmup."}
               </DialogDescription>
             </DialogHeader>
-            {!editId && <Progress value={stepProgress} className="mt-3 h-1" />}
+            {!editId && smtpPos >= 0 && <Progress value={stepProgress} className="mt-3 h-1" />}
           </div>
 
           <div className="px-6 pb-6">
@@ -416,31 +566,31 @@ export default function EmailAccountsManager() {
             {wizardStep === "provider" && (
               <div className="grid gap-3 pt-4">
                 <button
-                  onClick={() => selectProvider("smtp")}
+                  onClick={() => { window.location.href = "/api/email-accounts/google/start"; }}
                   className="flex items-center gap-4 rounded-lg border-2 p-4 text-left transition-colors hover:border-primary hover:bg-accent"
                 >
                   <GoogleIcon />
                   <div className="flex-1">
                     <p className="font-medium">Google / Gmail</p>
-                    <p className="text-sm text-muted-foreground">Gmail, Google Workspace</p>
+                    <p className="text-sm text-muted-foreground">Mit einem Klick anmelden · Gmail, Google Workspace</p>
                   </div>
                   <ArrowRight className="size-4 text-muted-foreground" />
                 </button>
 
                 <button
-                  onClick={() => selectProvider("microsoft_graph")}
+                  onClick={() => { window.location.href = "/api/email-accounts/microsoft/start"; }}
                   className="flex items-center gap-4 rounded-lg border-2 p-4 text-left transition-colors hover:border-primary hover:bg-accent"
                 >
                   <MicrosoftIcon />
                   <div className="flex-1">
                     <p className="font-medium">Microsoft / Outlook</p>
-                    <p className="text-sm text-muted-foreground">Office 365, Outlook, Hotmail</p>
+                    <p className="text-sm text-muted-foreground">Mit einem Klick anmelden · Office 365, Outlook</p>
                   </div>
                   <ArrowRight className="size-4 text-muted-foreground" />
                 </button>
 
                 <button
-                  onClick={() => selectProvider("smtp")}
+                  onClick={() => { setSetupKind("smtp"); selectProvider("smtp"); }}
                   className="flex items-center gap-4 rounded-lg border-2 p-4 text-left transition-colors hover:border-primary hover:bg-accent"
                 >
                   <div className="flex items-center justify-center size-8 rounded bg-muted"><Mail className="size-5" /></div>
@@ -457,7 +607,23 @@ export default function EmailAccountsManager() {
               </div>
             )}
 
-            {/* ── STEP 2: Credentials ── */}
+            {/* ── STEP: Anleitung + Video ── */}
+            {wizardStep === "guide" && (
+              <div className="grid gap-4 pt-4">
+                <MailboxSetupGuide kind={setupKind} />
+                <div className="flex gap-2 pt-1">
+                  <Button variant="outline" onClick={() => setWizardStep("provider")}>
+                    <ArrowLeft className="mr-1 size-4" /> Zurück
+                  </Button>
+                  <div className="flex-1" />
+                  <Button onClick={() => setWizardStep("credentials")}>
+                    Weiter <ArrowRight className="ml-1 size-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* ── STEP: Credentials (minimal) ── */}
             {wizardStep === "credentials" && (
               <div className="grid gap-4 pt-4">
                 {/* E-Mail + Name */}
@@ -485,7 +651,7 @@ export default function EmailAccountsManager() {
                       <div className="grid gap-2">
                         <Label htmlFor="ea-user">Benutzername</Label>
                         <Input id="ea-user" placeholder={form.sender_email || "info@domain.de"} value={form.smtp_username}
-                          onChange={(e) => setForm((f) => ({ ...f, smtp_username: e.target.value.slice(0, 256) }))} className="font-mono text-xs" />
+                          onChange={(e) => setForm((f) => ({ ...f, smtp_username: e.target.value.slice(0, 256) }))} />
                       </div>
                       <div className="grid gap-2">
                         <Label htmlFor="ea-pass">Passwort / App-Passwort</Label>
@@ -493,7 +659,7 @@ export default function EmailAccountsManager() {
                           <Input id="ea-pass" type={showSecrets["smtp_pw"] ? "text" : "password"}
                             placeholder="••••••••" value={form.smtp_password}
                             onChange={(e) => setForm((f) => ({ ...f, smtp_password: e.target.value.slice(0, 512) }))}
-                            className="font-mono text-xs pr-9" autoComplete="off" />
+                            className="pr-9" autoComplete="off" />
                           <Button type="button" variant="ghost" size="icon" onClick={() => toggleSecret("smtp_pw")}
                             className="text-muted-foreground absolute inset-y-0 right-0 rounded-l-none hover:bg-transparent">
                             {showSecrets["smtp_pw"] ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
@@ -514,12 +680,12 @@ export default function EmailAccountsManager() {
                           <div className="grid gap-2 sm:col-span-2">
                             <Label htmlFor="ea-host">SMTP-Server</Label>
                             <Input id="ea-host" placeholder="smtp.provider.de" value={form.smtp_host}
-                              onChange={(e) => setForm((f) => ({ ...f, smtp_host: e.target.value.slice(0, 256) }))} className="font-mono text-xs" />
+                              onChange={(e) => setForm((f) => ({ ...f, smtp_host: e.target.value.slice(0, 256) }))} />
                           </div>
                           <div className="grid gap-2">
                             <Label htmlFor="ea-port">Port</Label>
                             <Input id="ea-port" type="number" placeholder="587" value={form.smtp_port}
-                              onChange={(e) => setForm((f) => ({ ...f, smtp_port: Number(e.target.value) || 587 }))} className="font-mono text-xs" />
+                              onChange={(e) => setForm((f) => ({ ...f, smtp_port: Number(e.target.value) || 587 }))} />
                           </div>
                         </div>
                         <div className="grid gap-2">
@@ -552,15 +718,19 @@ export default function EmailAccountsManager() {
                 {form.provider === "microsoft_graph" && (
                   <div className="grid gap-4 rounded-lg border p-4 bg-muted/30">
                     <p className="text-sm text-muted-foreground">Azure AD App-Registrierung mit <code className="text-xs bg-muted px-1 py-0.5 rounded">Mail.Send</code> Berechtigung.</p>
+                    <p className="flex items-start gap-1.5 rounded-md bg-muted/50 px-2.5 py-2 text-xs text-muted-foreground">
+                      <Mail className="mt-0.5 size-3.5 shrink-0" />
+                      <span><span className="font-medium text-foreground">Shared-Postfach?</span> Trage als E-Mail-Adresse einfach die freigegebene Adresse ein (z.&nbsp;B. <code className="bg-muted px-1 rounded">office@firma.at</code>). Die App sendet direkt daraus – ein eigenes Postfach-Login oder eine Lizenz ist dafür nicht nötig.</span>
+                    </p>
                     <div className="grid gap-2">
                       <Label htmlFor="ea-tenant">Tenant ID</Label>
                       <Input id="ea-tenant" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value={form.ms_tenant_id}
-                        onChange={(e) => setForm((f) => ({ ...f, ms_tenant_id: e.target.value.slice(0, 256) }))} className="font-mono text-xs" />
+                        onChange={(e) => setForm((f) => ({ ...f, ms_tenant_id: e.target.value.slice(0, 256) }))} />
                     </div>
                     <div className="grid gap-2">
                       <Label htmlFor="ea-cid">Client ID</Label>
                       <Input id="ea-cid" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value={form.ms_client_id}
-                        onChange={(e) => setForm((f) => ({ ...f, ms_client_id: e.target.value.slice(0, 256) }))} className="font-mono text-xs" />
+                        onChange={(e) => setForm((f) => ({ ...f, ms_client_id: e.target.value.slice(0, 256) }))} />
                     </div>
                     <div className="grid gap-2">
                       <Label htmlFor="ea-csec">Client Secret</Label>
@@ -568,7 +738,7 @@ export default function EmailAccountsManager() {
                         <Input id="ea-csec" type={showSecrets["ms_sec"] ? "text" : "password"}
                           placeholder="xxxxxxxxxxxxxxxxxxxxxxxx" value={form.ms_client_secret}
                           onChange={(e) => setForm((f) => ({ ...f, ms_client_secret: e.target.value.slice(0, 512) }))}
-                          className="font-mono text-xs pr-9" autoComplete="off" />
+                          className="pr-9" autoComplete="off" />
                         <Button type="button" variant="ghost" size="icon" onClick={() => toggleSecret("ms_sec")}
                           className="text-muted-foreground absolute inset-y-0 right-0 rounded-l-none hover:bg-transparent">
                           {showSecrets["ms_sec"] ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
@@ -599,7 +769,7 @@ export default function EmailAccountsManager() {
                     </Button>
                   )}
                   <Button variant="outline" onClick={handleConnTest} disabled={connTesting || !form.sender_email.trim()}>
-                    {connTesting ? <Loader2 className="mr-1 size-4 animate-spin" /> : <TestTube className="mr-1 size-4" />}
+                    {connTesting && <Loader2 className="mr-1 size-4 animate-spin" />}
                     Verbindung testen
                   </Button>
                   <div className="flex-1" />
@@ -694,8 +864,8 @@ export default function EmailAccountsManager() {
                     <Label>Tägliches Sendelimit</Label>
                     <span className="text-sm tabular-nums font-medium">{form.daily_limit} / Tag</span>
                   </div>
-                  <Slider value={[form.daily_limit]} onValueChange={([v]) => setForm((f) => ({ ...f, daily_limit: Math.min(500, Math.max(1, v)) }))}
-                    min={1} max={500} step={5} />
+                  <Slider value={[form.daily_limit]} onValueChange={([v]) => setForm((f) => ({ ...f, daily_limit: Math.min(500, Math.max(10, v)) }))}
+                    min={10} max={500} step={10} />
                   <p className="text-xs text-muted-foreground">
                     Empfohlen: 30-50 für neue Konten, bis 200 für etablierte Domains.
                   </p>
@@ -717,8 +887,8 @@ export default function EmailAccountsManager() {
                           <Label>Starten mit</Label>
                           <span className="text-xs tabular-nums text-muted-foreground">{form.warmup_start} E-Mails / Tag</span>
                         </div>
-                        <Slider value={[form.warmup_start]} onValueChange={([v]) => setForm((f) => ({ ...f, warmup_start: Math.min(100, Math.max(1, v)) }))}
-                          min={1} max={100} step={1} />
+                        <Slider value={[form.warmup_start]} onValueChange={([v]) => setForm((f) => ({ ...f, warmup_start: Math.min(100, Math.max(5, v)) }))}
+                          min={5} max={100} step={5} />
                       </div>
                       <div className="grid gap-2">
                         <div className="flex items-center justify-between">
@@ -753,7 +923,212 @@ export default function EmailAccountsManager() {
           </div>
         </DialogContent>
       </Dialog>
-    </Card>
+
+      {/* ══════════ EINSTELLUNGEN (pro Konto) ══════════ */}
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent className="sm:max-w-[640px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <span className="truncate">{form.sender_email || "Postfach"}</span>
+            </DialogTitle>
+            <DialogDescription>Absender, Sendelimit, Warmup &amp; Tracking dieses Postfachs.</DialogDescription>
+          </DialogHeader>
+
+          {/* Konto-Kopf mit Test-Aktionen */}
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border p-3">
+            <MailboxLogo provider={form.provider} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{form.sender_email}</p>
+              <p className="text-xs text-muted-foreground">
+                {form.provider === "smtp" ? "SMTP" : form.provider === "google_oauth" ? "Google / Gmail" : "Microsoft 365"}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline" size="sm"
+                onClick={() => editId && handleTest(editId)} disabled={!editId || testing === editId}
+              >
+                {testing === editId && <Loader2 className="mr-1 size-4 animate-spin" />}
+                Verbindung testen
+              </Button>
+              <Button
+                variant="outline" size="sm"
+                onClick={handleSendTest} disabled={!editId || sendingTest}
+                title="Echte Test-E-Mail an deine eigene Adresse senden"
+              >
+                {sendingTest && <Loader2 className="mr-1 size-4 animate-spin" />}
+                Test-E-Mail senden
+              </Button>
+            </div>
+          </div>
+
+          <Accordion type="multiple" defaultValue={["sender", "limits"]} className="w-full">
+            {/* Absender & Alias */}
+            <AccordionItem value="sender">
+              <AccordionTrigger className="text-sm">Absender &amp; Alias</AccordionTrigger>
+              <AccordionContent className="grid gap-4 pt-1">
+                <div className="grid gap-2">
+                  <Label htmlFor="set-name">Absendername</Label>
+                  <Input id="set-name" placeholder="Max Mustermann" value={form.sender_name}
+                    onChange={(e) => setForm((f) => ({ ...f, sender_name: e.target.value.slice(0, 256) }))} />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="set-reply">Antwort-Adresse (Reply-To)</Label>
+                  <Input id="set-reply" type="email" placeholder={form.sender_email || "reply@domain.de"} value={form.reply_to}
+                    onChange={(e) => setForm((f) => ({ ...f, reply_to: e.target.value.slice(0, 254) }))} />
+                  <p className="text-xs text-muted-foreground">Antworten landen an dieser Adresse statt am Postfach.</p>
+                </div>
+                {(form.provider === "google_oauth" || form.provider === "microsoft_oauth") && (
+                  <div className="grid gap-2">
+                    <Label htmlFor="set-sendas">Senden als (Shared-Postfach)</Label>
+                    <Input id="set-sendas" type="email" placeholder="z. B. office@firma.at" value={form.send_as_email}
+                      onChange={(e) => setForm((f) => ({ ...f, send_as_email: e.target.value.slice(0, 254) }))} />
+                    <p className="text-xs text-muted-foreground">
+                      Optional: aus einem freigegebenen Postfach senden. Du brauchst Send-As-Recht
+                      {form.provider === "microsoft_oauth" ? " (Microsoft 365: Vollzugriff bzw. Senden-als)." : " (Gmail: verifizierter Senden-als-Alias)."} Leer = aus dem verbundenen Konto.
+                    </p>
+                  </div>
+                )}
+                <div className="grid gap-2">
+                  <Label htmlFor="set-label">Bezeichnung (intern)</Label>
+                  <Input id="set-label" placeholder="z.B. Outreach Domain 1" value={form.label}
+                    onChange={(e) => setForm((f) => ({ ...f, label: e.target.value.slice(0, 256) }))} />
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+
+            {/* Sendelimit & Warmup */}
+            <AccordionItem value="limits">
+              <AccordionTrigger className="text-sm">Sendelimit &amp; Warmup</AccordionTrigger>
+              <AccordionContent className="grid gap-5 pt-1">
+                <div className="grid gap-3">
+                  <div className="flex items-center justify-between">
+                    <Label>Tägliches Sendelimit</Label>
+                    <span className="text-sm tabular-nums font-medium">{form.daily_limit} / Tag</span>
+                  </div>
+                  <Slider value={[form.daily_limit]} onValueChange={([v]) => setForm((f) => ({ ...f, daily_limit: Math.min(500, Math.max(10, v)) }))}
+                    min={10} max={500} step={10} />
+                  <p className="text-xs text-muted-foreground">Empfohlen: 30–50 für neue Konten, bis 200 für etablierte Domains.</p>
+                </div>
+
+                <div className="flex items-center justify-between rounded-lg border p-4">
+                  <div>
+                    <p className="text-sm font-medium flex items-center gap-1"><Flame className="size-4 text-orange-500" /> Warmup</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Limit wird täglich automatisch erhöht, um Reputation aufzubauen.</p>
+                  </div>
+                  <Switch checked={form.warmup_enabled} onCheckedChange={(v) => setForm((f) => ({ ...f, warmup_enabled: v }))} />
+                </div>
+
+                {form.warmup_enabled && (
+                  <div className="rounded-lg border p-4 bg-muted/30 grid gap-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="grid gap-2">
+                        <div className="flex items-center justify-between">
+                          <Label>Starten mit</Label>
+                          <span className="text-xs tabular-nums text-muted-foreground">{form.warmup_start} / Tag</span>
+                        </div>
+                        <Slider value={[form.warmup_start]} onValueChange={([v]) => setForm((f) => ({ ...f, warmup_start: Math.min(100, Math.max(5, v)) }))}
+                          min={5} max={100} step={5} />
+                      </div>
+                      <div className="grid gap-2">
+                        <div className="flex items-center justify-between">
+                          <Label>Täglich erhöhen um</Label>
+                          <span className="text-xs tabular-nums text-muted-foreground">+{form.warmup_increment} / Tag</span>
+                        </div>
+                        <Slider value={[form.warmup_increment]} onValueChange={([v]) => setForm((f) => ({ ...f, warmup_increment: Math.min(50, Math.max(1, v)) }))}
+                          min={1} max={50} step={1} />
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Tag 1 = {form.warmup_start}, Tag 2 = {form.warmup_start + form.warmup_increment}, …
+                      bis max. {form.daily_limit} / Tag
+                      ({Math.ceil((form.daily_limit - form.warmup_start) / form.warmup_increment)} Tage bis Volllast).
+                    </p>
+                  </div>
+                )}
+              </AccordionContent>
+            </AccordionItem>
+
+            {/* Custom Tracking-Domain */}
+            <AccordionItem value="tracking">
+              <AccordionTrigger className="text-sm">Custom Tracking-Domain</AccordionTrigger>
+              <AccordionContent className="grid gap-3 pt-1">
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Beim Versand werden Öffnungen &amp; Klicks über eine Tracking-Domain gemessen. Standardmäßig läuft das über
+                  eine mit anderen Kunden <span className="font-medium text-foreground">geteilte Domain</span>. Richtest du eine
+                  <span className="font-medium text-foreground"> eigene Subdomain</span> ein, laufen alle Tracking-Links unter
+                  deiner eigenen Domain — das wirkt für Spamfilter vertrauenswürdiger und <span className="font-medium text-foreground">verbessert
+                  die Zustellbarkeit</span> spürbar.
+                </p>
+                <div className="grid gap-1.5 text-xs text-muted-foreground">
+                  <p><span className="font-medium text-foreground">1.</span> Öffne den DNS-Bereich deines Domain-Anbieters (z.&nbsp;B. IONOS, Strato, Cloudflare, GoDaddy).</p>
+                  <p><span className="font-medium text-foreground">2.</span> Lege einen neuen <span className="font-medium text-foreground">CNAME</span>-Eintrag mit exakt diesen Werten an:</p>
+                </div>
+                <div className="grid gap-1 rounded-lg border bg-muted/30 p-3 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">Typ</span><span className="font-mono">CNAME</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">Name / Host</span><span className="font-mono">track.{form.sender_email.split("@")[1] || "deine-domain.de"}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">Ziel / Wert</span><span className="font-mono">track.ki-kanzlei.at</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">TTL</span><span className="font-mono">3600 (Standard)</span>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Hinweis: Manche Anbieter erwarten im Feld „Name/Host&quot; nur <span className="font-mono">track</span> ohne deine Domain dahinter.
+                </p>
+                <div className="grid gap-1.5 text-xs text-muted-foreground">
+                  <p><span className="font-medium text-foreground">3.</span> Speichern und 15&nbsp;Min – 2&nbsp;Std warten (DNS-Propagation).</p>
+                  <p><span className="font-medium text-foreground">4.</span> Danach hier auf „Domain verifizieren&quot; klicken — wir prüfen den CNAME automatisch.</p>
+                </div>
+                <p className="flex items-center gap-1.5 rounded-md bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
+                  <Globe className="size-3.5 shrink-0" /> Optional: Ohne Custom-Domain funktioniert das Tracking weiterhin über die Standard-Domain.
+                </p>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSettingsOpen(false)}>Schließen</Button>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving && <Loader2 className="mr-1 size-4 animate-spin" />}
+              Speichern
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ══════════ SETUP-GUIDE (Nachschlagen) ══════════ */}
+      <Dialog open={guideOpen} onOpenChange={setGuideOpen}>
+        <DialogContent className="sm:max-w-[860px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Einrichtungs-Anleitung</DialogTitle>
+            <DialogDescription>Schritt-für-Schritt je Anbieter — jederzeit zum Nachschlagen.</DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-1 rounded-lg border p-1">
+            {(["google", "microsoft", "smtp"] as SetupKind[]).map((k) => {
+              const label = k === "google" ? "Google / Gmail" : k === "microsoft" ? "Microsoft 365" : "Anderer (SMTP)";
+              return (
+                <button
+                  key={k}
+                  onClick={() => setGuideKind(k)}
+                  className={`flex-1 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors ${
+                    guideKind === k ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          <MailboxSetupGuide kind={guideKind} />
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
 

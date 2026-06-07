@@ -26,7 +26,7 @@ import type {
   LegacyMessage,
 } from "./types";
 
-const CS_BASE_URL = "https://api.connectsafely.ai";
+const CS_BASE_URL = "https://api.connectsafely.ai/linkedin";
 
 /* ── Helpers: extract profileId from URL/identifier ───────────── */
 
@@ -332,7 +332,10 @@ export class ConnectSafelyClient {
       last_name: p.lastName,
       headline: p.headline,
       summary: p.summary,
-      location: p.location,
+      // ConnectSafely liefert location teils als Objekt ({geoLocationName}) → String erzwingen
+      location: typeof p.location === "string"
+        ? p.location
+        : (() => { const l = p.location as unknown as { geoLocationName?: string; name?: string } | null; return l?.geoLocationName ?? l?.name ?? undefined; })(),
       industry: p.industry,
       profile_picture_url: p.profilePicture,
       profile_picture_url_large: p.profilePicture,

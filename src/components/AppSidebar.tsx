@@ -4,17 +4,19 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import {
-    LayoutDashboard, Users, Send, Linkedin, SearchCheck, Share2,
+    LayoutDashboard, Users, Send, Share2, Linkedin,
     Settings, ChevronsUpDown,
     LogOut, BadgeCheck, Bell, Loader2,
-    Inbox, ListChecks, Calendar, Contact, GitBranch, FileText, UserCog,
-    History,
+    Inbox, MessageCircle, BookOpen, ExternalLink,
 } from "lucide-react";
+
+/** Doku/Guides-Link (Platzhalter — bei eigener Doku-Seite hier ändern). */
+const DOCS_URL = "https://www.ki-kanzlei.at";
 import { useState, useEffect } from "react";
 
 import {
     Sidebar, SidebarContent, SidebarFooter,
-    SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
+    SidebarGroup, SidebarGroupContent,
     SidebarHeader, SidebarMenu,
     SidebarMenuButton, SidebarMenuItem, SidebarRail,
 } from "@/components/ui/sidebar";
@@ -23,7 +25,7 @@ import {
     DropdownMenuItem, DropdownMenuLabel,
     DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { createClient } from "@/lib/supabase/client";
 
@@ -43,40 +45,35 @@ type NavItem = {
     /** Dynamische LinkedIn-Lead-Count-Anbindung */
     isLinkedInCount?: boolean;
 };
+/* MVP-Navigation — 1:1 aus dem Claude-Design (Inbox.html · Sidebar):
+   Übersicht · CRM · Kanäle · Setup */
 const sections: { label: string; items: NavItem[] }[] = [
     {
         label: "Übersicht",
         items: [
-            { name: "Dashboard", href: "/dashboard",           icon: LayoutDashboard },
-            { name: "Inbox",     href: "/dashboard/inbox",     icon: Inbox,      disabled: true, pip: 3 },
-            { name: "Aufgaben",  href: "/dashboard/tasks",     icon: ListChecks, disabled: true, count: 8 },
-            { name: "Kalender",  href: "/dashboard/calendar",  icon: Calendar,   disabled: true },
+            { name: "Dashboard", href: "/dashboard",       icon: LayoutDashboard },
+            { name: "Inbox",     href: "/dashboard/inbox", icon: Inbox, pip: 3 },
         ],
     },
     {
         label: "CRM",
         items: [
-            { name: "Leads",       href: "/dashboard/leads",            icon: Users,    isLeadsCount: true },
-            { name: "Kontakte",    href: "/dashboard/contacts",         icon: Contact,  disabled: true, count: 186 },
-            { name: "Pipeline",    href: "/dashboard/pipeline",         icon: GitBranch, disabled: true },
-            { name: "Kampagnen",   href: "/dashboard/campaigns",        icon: Send,     count: 7 },
-            { name: "LinkedIn",    href: "/dashboard/linkedin",         icon: Linkedin, isLinkedInCount: true },
-            { name: "Suchverlauf", href: "/dashboard/leads?tab=search", icon: History },
+            { name: "Leads",         href: "/dashboard/leads",         icon: Users,        isLeadsCount: true },
+            { name: "AI Researcher", href: "/dashboard/ai-researcher", icon: MessageCircle },
         ],
     },
     {
-        label: "Wachstum",
+        label: "Kanäle",
         items: [
-            { name: "SEO",          href: "/dashboard/seo",          icon: SearchCheck },
-            { name: "Social Media", href: "/dashboard/social-media", icon: Share2      },
-            { name: "Berichte",     href: "/dashboard/reports",      icon: FileText, disabled: true },
+            { name: "E-Mail-Kampagnen", href: "/dashboard/campaigns",    icon: Send,     count: 7 },
+            { name: "LinkedIn",         href: "/dashboard/linkedin",     icon: Linkedin, isLinkedInCount: true },
+            { name: "Social Media",     href: "/dashboard/social-media", icon: Share2 },
         ],
     },
     {
         label: "Setup",
         items: [
             { name: "Einstellungen", href: "/dashboard/settings", icon: Settings },
-            { name: "Team",          href: "/dashboard/team",     icon: UserCog, disabled: true },
         ],
     },
 ];
@@ -106,6 +103,7 @@ interface AppSidebarProps {
     user: {
         email: string;
         name?: string | null;
+        avatarUrl?: string | null;
     };
     role?: "admin" | "user";
 }
@@ -174,7 +172,7 @@ export function AppSidebar({ user, role = "user" }: AppSidebarProps) {
                                         KI Kanzlei
                                     </span>
                                     <p className="text-[11px] text-muted-foreground font-normal">
-                                        Lead-CRM
+                                        Outreach Plattform
                                     </p>
                                 </div>
                             </Link>
@@ -185,14 +183,10 @@ export function AppSidebar({ user, role = "user" }: AppSidebarProps) {
 
             {/* ── Content ── */}
             <SidebarContent>
-                {sections.map((section) => (
-                    <SidebarGroup key={section.label}>
-                        <SidebarGroupLabel className="text-muted-foreground uppercase text-[10.5px] tracking-wider font-medium">
-                            {section.label}
-                        </SidebarGroupLabel>
-                        <SidebarGroupContent>
-                            <SidebarMenu>
-                                {section.items.map((item) => {
+                <SidebarGroup>
+                    <SidebarGroupContent>
+                        <SidebarMenu>
+                            {sections.flatMap((s) => s.items).map((item) => {
                                     const { name, href, icon: Icon, disabled, pip, count, isLeadsCount, isLinkedInCount } = item;
                                     const active = isActive(pathname, href);
                                     const displayCount = isLeadsCount
@@ -246,14 +240,32 @@ export function AppSidebar({ user, role = "user" }: AppSidebarProps) {
                                         </SidebarMenuItem>
                                     );
                                 })}
-                            </SidebarMenu>
-                        </SidebarGroupContent>
-                    </SidebarGroup>
-                ))}
+                        </SidebarMenu>
+                    </SidebarGroupContent>
+                </SidebarGroup>
             </SidebarContent>
 
             {/* ── Footer / User ── */}
             <SidebarFooter className="border-t border-sidebar-border">
+                {/* Hilfe-/Guides-Badge über dem Profil (im Icon-Modus ausgeblendet) */}
+                <a
+                    href={DOCS_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group-data-[collapsible=icon]:hidden mx-1 mb-1 block rounded-lg border border-sidebar-border bg-sidebar-accent/40 p-3 transition-colors hover:bg-sidebar-accent/70"
+                >
+                    <div className="flex items-center gap-2">
+                        <BookOpen className="h-4 w-4 text-primary shrink-0" strokeWidth={1.75} />
+                        <span className="text-[12px] font-medium text-sidebar-foreground">Anleitungen & Guides</span>
+                    </div>
+                    <p className="mt-1 text-[11px] text-muted-foreground leading-snug">
+                        Setup-Tipps & How-tos von unseren Experten.
+                    </p>
+                    <span className="mt-2 inline-flex items-center gap-1 text-[11.5px] font-medium text-primary">
+                        Dokumentation öffnen <ExternalLink className="h-3 w-3" />
+                    </span>
+                </a>
+
                 <SidebarMenu>
                     <SidebarMenuItem>
                         <DropdownMenu>
@@ -264,6 +276,7 @@ export function AppSidebar({ user, role = "user" }: AppSidebarProps) {
                                     tooltip="Mein Konto"
                                 >
                                     <Avatar className="h-7 w-7 flex-shrink-0 rounded-md">
+                                        {user.avatarUrl && <AvatarImage src={user.avatarUrl} alt={displayName} className="object-cover" />}
                                         <AvatarFallback className="bg-primary text-primary-foreground font-medium text-[10.5px] rounded-md">
                                             {initials}
                                         </AvatarFallback>
@@ -286,6 +299,7 @@ export function AppSidebar({ user, role = "user" }: AppSidebarProps) {
                                 <DropdownMenuLabel className="px-4 py-3.5 border-b border-border/50">
                                     <div className="flex items-center gap-3">
                                         <Avatar className="h-9 w-9 flex-shrink-0 rounded-xl">
+                                            {user.avatarUrl && <AvatarImage src={user.avatarUrl} alt={displayName} className="object-cover" />}
                                             <AvatarFallback className="bg-primary text-primary-foreground font-bold rounded-xl">
                                                 {initials}
                                             </AvatarFallback>

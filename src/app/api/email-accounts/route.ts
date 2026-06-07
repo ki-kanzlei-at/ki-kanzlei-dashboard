@@ -57,6 +57,7 @@ export async function POST(request: NextRequest) {
       sender_email: senderEmail,
       sender_name: sanitize(body.sender_name, 256) || null,
       reply_to: sanitize(body.reply_to, 254) || null,
+      send_as_email: null, // Send-As nur für OAuth-Konten (per PATCH gesetzt)
       smtp_host: provider === "smtp" ? sanitize(body.smtp_host, 256) : null,
       smtp_port: provider === "smtp" ? (Number(body.smtp_port) || 587) : null,
       smtp_username: provider === "smtp" ? sanitize(body.smtp_username) : null,
