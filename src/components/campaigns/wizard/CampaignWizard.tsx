@@ -208,16 +208,19 @@ export function CampaignWizard() {
         {/* Secondary top bar — nur Draft/Abbrechen (Breadcrumb steckt schon im Header) */}
         <div className="wiz-topbar">
           <div className="ml-auto flex items-center gap-1.5">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 text-xs"
-              onClick={saveDraft}
-              disabled={submitting}
-            >
-              {submitting && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
-              Als Entwurf speichern
-            </Button>
+            {/* Entwurf erst ab Schritt 2 sinnvoll (vorher gibt es keinen Namen) */}
+            {current >= 1 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={saveDraft}
+                disabled={submitting}
+              >
+                {submitting && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+                Als Entwurf speichern
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"
@@ -231,8 +234,8 @@ export function CampaignWizard() {
           </div>
         </div>
 
-        {/* Step body */}
-        <div className="wiz-body">
+        {/* Step body — Mailbox-Step vertikal zentriert (wenig Inhalt) */}
+        <div className={cn("wiz-body", current === 0 && "wiz-body--center")}>
           {current === 0 && <StepMailbox  state={state.mailbox}  onChange={setMailbox} />}
           {current === 1 && <StepBasics   state={state.basics}   onChange={(b) => setState((s) => ({ ...s, basics: b }))} />}
           {current === 2 && <StepAudience state={state.audience} onChange={(a) => setState((s) => ({ ...s, audience: a }))} />}

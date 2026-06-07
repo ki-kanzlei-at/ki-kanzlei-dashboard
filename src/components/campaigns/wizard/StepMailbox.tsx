@@ -151,7 +151,7 @@ export function StepMailbox({ state, onChange }: StepMailboxProps) {
                   <h3 className="choice-name">{mb.sender_email}</h3>
                   <p className="choice-desc">
                     {PROVIDER_LABEL[mb.provider] ?? mb.provider}
-                    {mb.label && ` · Absender: ${mb.label}`}
+                    {mb.label && mb.label !== mb.sender_email && ` · ${mb.label}`}
                   </p>
                   <div className="choice-meta">
                     <HealthDot status={mb.is_active ? mb.health_status : "paused"} />
