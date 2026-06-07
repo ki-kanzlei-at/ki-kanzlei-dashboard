@@ -58,7 +58,7 @@ export function StepReview({ state, onJump }: StepReviewProps) {
     {
       k: "KI-Anweisung",
       v: `${state.sequence.systemPrompt.length} Zeichen Prompt`,
-      sub: `${state.sequence.steps.length} ${state.sequence.steps.length === 1 ? "Mail" : "Mails"} autonom geschrieben`,
+      sub: `${state.sequence.mailCount} ${state.sequence.mailCount === 1 ? "Mail" : "Mails"} autonom geschrieben`,
       jump: 3,
     },
     {

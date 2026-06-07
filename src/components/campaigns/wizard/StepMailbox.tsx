@@ -98,7 +98,9 @@ export function StepMailbox({ state, onChange }: StepMailboxProps) {
       mailboxId: mb.id,
       email: mb.sender_email,
       provider: mb.provider,
-      senderName: mb.label || mb.sender_email,
+      // Echten Absendernamen des Kontos nehmen — NICHT die E-Mail (sonst steht
+      // die Adresse im Namensfeld). Leer lassen, falls keiner hinterlegt ist.
+      senderName: mb.sender_name?.trim() || "",
     });
   }
 
@@ -200,7 +202,7 @@ export function StepMailbox({ state, onChange }: StepMailboxProps) {
           <div>
             <div className="t">Mehrere Mailboxen rotieren?</div>
             <div className="b">
-              Du kannst später mehrere Mailboxen für diese Kampagne hinzufügen — wir verteilen Mails automatisch und halten alle unter ihrem Tageslimit.
+              Du kannst später mehrere Mailboxen für diese Kampagne hinzufügen. Wir verteilen Mails automatisch und halten alle unter ihrem Tageslimit.
             </div>
           </div>
         </div>

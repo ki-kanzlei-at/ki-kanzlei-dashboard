@@ -52,7 +52,7 @@ const sections: { label: string; items: NavItem[] }[] = [
         label: "Übersicht",
         items: [
             { name: "Dashboard", href: "/dashboard",       icon: LayoutDashboard },
-            { name: "Inbox",     href: "/dashboard/inbox", icon: Inbox, pip: 3 },
+            { name: "Inbox",     href: "/dashboard/inbox", icon: Inbox },
         ],
     },
     {
@@ -65,7 +65,7 @@ const sections: { label: string; items: NavItem[] }[] = [
     {
         label: "Kanäle",
         items: [
-            { name: "E-Mail-Kampagnen", href: "/dashboard/campaigns",    icon: Send,     count: 7 },
+            { name: "E-Mail-Kampagnen", href: "/dashboard/campaigns",    icon: Send },
             { name: "LinkedIn",         href: "/dashboard/linkedin",     icon: Linkedin, isLinkedInCount: true },
             { name: "Social Media",     href: "/dashboard/social-media", icon: Share2 },
         ],

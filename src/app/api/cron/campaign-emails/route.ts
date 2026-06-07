@@ -77,6 +77,13 @@ export async function GET(request: NextRequest) {
         const cs = settings?.campaign_settings;
         const signature = cs?.signature || "";
         const globalWindow = normalizeSendWindow(cs?.send_window);
+        const brand = settings?.brand_settings;
+        const companyContext = {
+          companyName: brand?.company_name ?? null,
+          offering: brand?.offering ?? null,
+          valueProp: brand?.value_prop ?? null,
+          targetCustomer: brand?.target_customer ?? null,
+        };
 
         /* Sendefenster prüfen (Kampagne hat Vorrang, sonst globales Fenster) */
         if (!isInCampaignWindow(campaign, globalWindow)) {
@@ -238,6 +245,7 @@ export async function GET(request: NextRequest) {
               signature,
               trackingPixelUrl,
               unsubscribeEmail,
+              companyContext,
             });
 
             const htmlWithClickTracking = trackClicks

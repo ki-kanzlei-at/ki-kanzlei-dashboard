@@ -274,7 +274,7 @@ export function StepAudience({ state, onChange }: StepAudienceProps) {
           </div>
         ) : leads.length === 0 ? (
           <div className="px-6 py-12 text-center text-[13px] text-muted-foreground">
-            Keine Leads gefunden — passe Filter an oder importiere weitere Leads.
+            Keine Leads gefunden. Passe die Filter an oder importiere weitere Leads.
           </div>
         ) : (
           <table>
@@ -357,7 +357,7 @@ export function StepAudience({ state, onChange }: StepAudienceProps) {
       <div className="row-toggle mt-4 rounded-lg border border-border bg-card px-4 py-3">
         <div className="label-block">
           <div className="t">Bereits kontaktierte Leads ausblenden</div>
-          <div className="s">Empfohlen — verhindert Mehrfach-Kontaktierungen.</div>
+          <div className="s">Empfohlen, verhindert Mehrfach-Kontaktierungen.</div>
         </div>
         <Switch
           checked={state.excludeContacted}

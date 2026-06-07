@@ -10,6 +10,7 @@ export interface MailboxOption {
   id: string;
   provider: EmailProvider;
   sender_email: string;
+  sender_name: string | null;
   label: string | null;
   is_active: boolean;
   warmup_enabled: boolean;
@@ -54,10 +55,30 @@ export interface SequenceDelay {
 }
 
 export interface SequenceState {
+  /** Master-Prompt: einmal einstellen, die KI schreibt jede Mail daraus. */
   systemPrompt: string;
-  steps: SequenceStep[];
-  delays: SequenceDelay[];
+  /** Gesamtzahl Mails inkl. Erstkontakt (1..5). */
+  mailCount: number;
+  /** Tage Wartezeit vor jeder Folge-Mail (Länge = mailCount-1). */
+  delayDays: number[];
   autoStopOnReply: boolean;
+}
+
+/** Leitet die (für den Versand nötigen) Sequenz-Steps automatisch aus der
+ *  Mail-Anzahl ab — der/die User konfiguriert keine Intents/Beschreibungen mehr. */
+export function buildAutoSteps(count: number): SequenceStep[] {
+  const n = Math.max(1, Math.min(5, count));
+  return Array.from({ length: n }, (_, i) => {
+    const isFirst = i === 0;
+    const isLast = i === n - 1 && n > 1;
+    const intent = isFirst ? "Erstkontakt" : isLast ? "Letzter Versuch" : "Follow-up";
+    const desc = isFirst
+      ? "Kurzer Pitch mit konkretem Bezug auf den Empfänger"
+      : isLast
+        ? "Freundliche letzte Nachfrage, ob es grundsätzlich passt"
+        : "Kurze Erinnerung mit einem neuen, konkreten Mehrwert";
+    return { id: `s${i + 1}`, intent, desc };
+  });
 }
 
 export interface ScheduleState {

@@ -208,7 +208,7 @@ export function StepSchedule({ state, onChange }: StepScheduleProps) {
           <div className="row-toggle">
             <div className="label-block">
               <div className="t">Öffnungen tracken</div>
-              <div className="s">Wir setzen ein 1×1 Pixel — schaltbar pro Empfänger.</div>
+              <div className="s">Wir setzen ein 1×1 Pixel, schaltbar pro Empfänger.</div>
             </div>
             <Switch
               checked={state.trackOpens}

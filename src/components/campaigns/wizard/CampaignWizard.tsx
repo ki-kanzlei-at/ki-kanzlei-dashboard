@@ -17,6 +17,7 @@ import { StepSchedule } from "./StepSchedule";
 import { StepReview } from "./StepReview";
 import {
   STEPS,
+  buildAutoSteps,
   type WizardState,
 } from "./types";
 
@@ -44,15 +45,8 @@ const INITIAL_STATE: WizardState = {
   },
   sequence: {
     systemPrompt: "",
-    steps: [
-      { id: "s1", intent: "Erstkontakt",    desc: "Kurzer Pitch + konkreter Bezug auf den Empfänger" },
-      { id: "s2", intent: "Follow-up",      desc: "Mehrwert anbieten (z. B. konkrete Zahl, Case-Study)" },
-      { id: "s3", intent: "Letzter Versuch", desc: "Direktfrage — passt es oder nicht?" },
-    ],
-    delays: [
-      { value: 3, unit: "day" },
-      { value: 5, unit: "day" },
-    ],
+    mailCount: 3,
+    delayDays: [3, 5],
     autoStopOnReply: true,
   },
   schedule: {
@@ -97,7 +91,7 @@ export function CampaignWizard() {
       case 0: return !!state.mailbox.mailboxId;
       case 1: return state.basics.name.trim().length > 0 && state.basics.senderName.trim().length > 0;
       case 2: return state.audience.selectedLeadIds.size > 0;
-      case 3: return state.sequence.systemPrompt.trim().length >= 50 && state.sequence.steps.length > 0;
+      case 3: return state.sequence.systemPrompt.trim().length >= 50 && state.sequence.mailCount > 0;
       case 4: return state.schedule.days.some(Boolean) && state.schedule.daily > 0;
       default: return true;
     }
@@ -170,8 +164,11 @@ export function CampaignWizard() {
       language: state.basics.language,
       tone: state.basics.tone,
       system_prompt: state.sequence.systemPrompt,
-      sequence_steps: state.sequence.steps,
-      sequence_delays: state.sequence.delays,
+      // Steps werden automatisch aus der Mail-Anzahl abgeleitet (kein Micro-Tuning).
+      sequence_steps: buildAutoSteps(state.sequence.mailCount),
+      sequence_delays: state.sequence.delayDays
+        .slice(0, Math.max(0, state.sequence.mailCount - 1))
+        .map((value) => ({ value, unit: "day" as const })),
       auto_stop_on_reply: state.sequence.autoStopOnReply,
       schedule: {
         days: state.schedule.days,
@@ -239,7 +236,18 @@ export function CampaignWizard() {
           {current === 0 && <StepMailbox  state={state.mailbox}  onChange={setMailbox} />}
           {current === 1 && <StepBasics   state={state.basics}   onChange={(b) => setState((s) => ({ ...s, basics: b }))} />}
           {current === 2 && <StepAudience state={state.audience} onChange={(a) => setState((s) => ({ ...s, audience: a }))} />}
-          {current === 3 && <StepSequence state={state.sequence} onChange={(q) => setState((s) => ({ ...s, sequence: q }))} />}
+          {current === 3 && (
+            <StepSequence
+              state={state.sequence}
+              onChange={(q) => setState((s) => ({ ...s, sequence: q }))}
+              preview={{
+                leadId: Array.from(state.audience.selectedLeadIds)[0] ?? null,
+                tone: state.basics.tone,
+                language: state.basics.language,
+                senderName: state.basics.senderName,
+              }}
+            />
+          )}
           {current === 4 && <StepSchedule state={state.schedule} onChange={(sc) => setState((s) => ({ ...s, schedule: sc }))} />}
           {isReview      && <StepReview   state={state}          onJump={jump} />}
         </div>

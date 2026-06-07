@@ -50,4 +50,5 @@ playwright-report/
 dev-server.log
 dev-*.log
 /shot-*.png
+/wiz-*.png
 /Usersmarku*

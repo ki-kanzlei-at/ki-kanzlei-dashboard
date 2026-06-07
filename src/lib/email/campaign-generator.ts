@@ -29,6 +29,15 @@ export interface GeneratedMail {
   generator: "gemini" | "template";
 }
 
+/** Angebot/Positionierung aus den Einstellungen (brand_settings) — gibt der KI
+ *  eine Faktenbasis über Produkte & Dienstleistungen, statt sie zu erfinden. */
+export interface CompanyContext {
+  companyName?: string | null;
+  offering?: string | null;
+  valueProp?: string | null;
+  targetCustomer?: string | null;
+}
+
 export async function generateCampaignMail(opts: {
   campaign: Campaign;
   step: SequenceStep;
@@ -39,6 +48,8 @@ export async function generateCampaignMail(opts: {
   trackingPixelUrl?: string | null;
   /** Wenn gesetzt: Abmeldelink (mailto) wird angehängt (DSGVO). */
   unsubscribeEmail?: string | null;
+  /** Angebot aus den Einstellungen — wird der KI als Faktenbasis gegeben. */
+  companyContext?: CompanyContext | null;
 }): Promise<GeneratedMail> {
   const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
   if (apiKey) {
@@ -63,6 +74,7 @@ async function generateViaGemini(
     signature?: string;
     trackingPixelUrl?: string | null;
     unsubscribeEmail?: string | null;
+    companyContext?: CompanyContext | null;
   },
   apiKey: string,
 ): Promise<GeneratedMail> {
@@ -86,6 +98,9 @@ async function generateViaGemini(
 # Kampagnen-Kontext (System-Prompt der/des Absender:in)
 ${(opts.campaign.system_prompt ?? "").trim() || "(keine spezifische Anweisung)"}
 
+# Angebot der/des Absender:in (aus den Einstellungen — als Faktenbasis nutzen, nichts dazuerfinden)
+${buildCompanyContext(opts.companyContext)}
+
 # Schritt in der Sequenz
 - Position: Mail ${opts.stepIndex + 1} von ${opts.campaign.sequence_steps.length}
 - Intent: ${opts.step.intent}
@@ -99,6 +114,7 @@ ${recipient}
 - Tonalität: ${styleHints}
 - Länge: 60–140 Wörter, keine Floskeln
 - Keine Buzzwords (revolutionär, bahnbrechend, disruptiv, …)
+- KEINE Gedankenstriche (weder „—" noch „–"). Nutze Punkt, Komma oder Doppelpunkt. Gedankenstriche wirken maschinell generiert.
 - Keine Markdown-Symbole im Body
 - Subject: max. 70 Zeichen, kein Klick-Bait
 - Schreibe konkret und individuell — beziehe dich, wenn möglich, auf Branche/Standort
@@ -208,7 +224,7 @@ function fallbackBody(opts: {
 
   if (opts.stepIndex === 0) {
     return [
-      `${company} ist mir aufgefallen — vor allem im Kontext von ${industry} in ${city}.`,
+      `${company} ist mir aufgefallen, vor allem im Kontext von ${industry} in ${city}.`,
       `Bei vergleichbaren Unternehmen konnten wir mit unserer Lösung wiederkehrende Aufgaben spürbar verkürzen.`,
       `Hätten Sie kommende Woche 15 Minuten Zeit für einen kurzen Austausch?`,
       `${senderName}`,
@@ -216,15 +232,25 @@ function fallbackBody(opts: {
   }
   if (opts.stepIndex >= opts.campaign.sequence_steps.length - 1) {
     return [
-      `Eine letzte kurze Nachricht: Falls das Thema bei ${company} aktuell nicht relevant ist, kein Problem — eine kurze Rückmeldung genügt.`,
+      `Eine letzte kurze Nachricht: Falls das Thema bei ${company} aktuell nicht relevant ist, kein Problem. Eine kurze Rückmeldung genügt.`,
       `Sollten Sie doch interessiert sein, reicht ein 15-Min.-Slot für einen ersten Eindruck.`,
     ].join("\n\n");
   }
   return [
-    `Falls meine vorherige Nachricht untergegangen ist — kurzer Nachtrag:`,
+    `Falls meine vorherige Nachricht untergegangen ist, hier ein kurzer Nachtrag:`,
     `Wir helfen ${industry}-Unternehmen, wiederkehrende Arbeit zu automatisieren und Vorbereitungszeit deutlich zu reduzieren.`,
     `Passt ein 15-minütiger Termin in der nächsten Woche?`,
   ].join("\n\n");
+}
+
+function buildCompanyContext(ctx: CompanyContext | null | undefined): string {
+  if (!ctx) return "(kein Angebot hinterlegt — halte dich an den System-Prompt oben)";
+  const lines: string[] = [];
+  if (ctx.companyName?.trim())    lines.push(`- Unternehmen: ${ctx.companyName.trim()}`);
+  if (ctx.offering?.trim())       lines.push(`- Produkte & Dienstleistungen: ${ctx.offering.trim()}`);
+  if (ctx.valueProp?.trim())      lines.push(`- Nutzenversprechen/USP: ${ctx.valueProp.trim()}`);
+  if (ctx.targetCustomer?.trim()) lines.push(`- Zielkunden: ${ctx.targetCustomer.trim()}`);
+  return lines.length ? lines.join("\n") : "(kein Angebot hinterlegt — halte dich an den System-Prompt oben)";
 }
 
 function buildRecipientContext(lead: GeneratorLead): string {
