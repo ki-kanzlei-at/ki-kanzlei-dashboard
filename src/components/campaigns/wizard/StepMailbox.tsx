@@ -44,13 +44,15 @@ function SmtpLogo({ size = 22 }: { size?: number }) {
 
 const PROVIDER_LABEL: Record<string, string> = {
   google: "Google Workspace",
+  google_oauth: "Google Workspace",
   microsoft_graph: "Microsoft 365",
+  microsoft_oauth: "Microsoft 365",
   smtp: "SMTP",
 };
 
 function ProviderLogo({ provider }: { provider: string }) {
-  if (provider === "google") return <GoogleLogo />;
-  if (provider === "microsoft_graph") return <MicrosoftLogo />;
+  if (provider === "google" || provider === "google_oauth") return <GoogleLogo />;
+  if (provider === "microsoft_graph" || provider === "microsoft_oauth") return <MicrosoftLogo />;
   return <SmtpLogo />;
 }
 

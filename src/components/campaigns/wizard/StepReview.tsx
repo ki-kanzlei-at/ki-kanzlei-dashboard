@@ -11,7 +11,9 @@ interface StepReviewProps {
 
 const PROVIDER_LABEL: Record<string, string> = {
   google: "Google Workspace",
+  google_oauth: "Google Workspace",
   microsoft_graph: "Microsoft 365",
+  microsoft_oauth: "Microsoft 365",
   smtp: "SMTP",
 };
 

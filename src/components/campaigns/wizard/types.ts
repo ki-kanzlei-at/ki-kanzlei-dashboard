@@ -4,7 +4,7 @@ export type WizardStep = 0 | 1 | 2 | 3 | 4 | 5; // 0..4 = steps, 5 = review
 
 export type Tone = "formal" | "professional" | "casual";
 
-export type EmailProvider = "google" | "microsoft_graph" | "smtp";
+export type EmailProvider = "google" | "google_oauth" | "microsoft_graph" | "microsoft_oauth" | "smtp";
 
 export interface MailboxOption {
   id: string;
