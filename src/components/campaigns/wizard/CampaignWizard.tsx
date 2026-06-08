@@ -30,6 +30,7 @@ const INITIAL_STATE: WizardState = {
     email: "",
     provider: null,
     senderName: "",
+    replyTo: "",
   },
   basics: {
     name: "",
@@ -79,8 +80,11 @@ export function CampaignWizard() {
       mailbox: next,
       basics: {
         ...s.basics,
+        // Absender & Antwort-Adresse kommen aus dem Postfach (zentral gepflegt) –
+        // im Wizard nicht mehr editierbar.
         senderEmail: next.email,
-        senderName: s.basics.senderName || next.senderName,
+        senderName: next.senderName,
+        replyTo: next.replyTo,
       },
     }));
   }
@@ -89,7 +93,7 @@ export function CampaignWizard() {
   const canProceed = useMemo(() => {
     switch (current) {
       case 0: return !!state.mailbox.mailboxId;
-      case 1: return state.basics.name.trim().length > 0 && state.basics.senderName.trim().length > 0;
+      case 1: return state.basics.name.trim().length > 0;
       case 2: return state.audience.selectedLeadIds.size > 0;
       case 3: return state.sequence.systemPrompt.trim().length >= 50 && state.sequence.mailCount > 0;
       case 4: return state.schedule.days.some(Boolean) && state.schedule.daily > 0;

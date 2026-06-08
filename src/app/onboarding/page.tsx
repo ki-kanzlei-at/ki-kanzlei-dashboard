@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, Check, Info, Loader2, Mail } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Globe, Info, Loader2, Mail, Sparkles } from "lucide-react";
 
 import { toast } from "sonner";
 
@@ -12,6 +12,7 @@ import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -131,7 +132,17 @@ const PROVIDERS = [
 ];
 
 /* ── State ───────────────────────────────────────────────────────── */
+interface AnalyzedBrand {
+  company_name: string | null;
+  tagline: string | null;
+  offering: string | null;
+  value_prop: string | null;
+  target_customer: string | null;
+}
+
 interface OnboardingState {
+  website: string | null;
+  brand: AnalyzedBrand | null;   // aus der Website-Analyse vorbefüllt → brand_settings
   role: string | null;
   businessType: string | null;
   teamSize: string | null;
@@ -144,6 +155,8 @@ interface OnboardingState {
 }
 
 const INITIAL: OnboardingState = {
+  website: null,
+  brand: null,
   role: null,
   businessType: null,
   teamSize: null,
@@ -202,13 +215,81 @@ const COMPACT_TOGGLE = "flex h-auto w-full min-w-0 flex-col items-center justify
    STEP 1 — Profil
    ══════════════════════════════════════════════════════════════ */
 function StepProfile({ state, onChange }: { state: OnboardingState; onChange: (s: OnboardingState) => void }) {
+  const [url, setUrl] = useState(state.website ?? "");
+  const [analyzing, setAnalyzing] = useState(false);
+
+  async function analyzeWebsite() {
+    const u = url.trim();
+    if (!u) { toast.error("Bitte Website-Adresse eingeben"); return; }
+    setAnalyzing(true);
+    try {
+      const res = await fetch("/api/brand/analyze-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: u }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) { toast.error(json?.error ?? "Analyse fehlgeschlagen"); return; }
+      const d = (json?.data ?? {}) as Partial<AnalyzedBrand>;
+      onChange({
+        ...state,
+        website: u,
+        brand: {
+          company_name:    d.company_name ?? null,
+          tagline:         d.tagline ?? null,
+          offering:        d.offering ?? null,
+          value_prop:      d.value_prop ?? null,
+          target_customer: d.target_customer ?? null,
+        },
+      });
+      toast.success("Website analysiert — dein Angebot ist vorbefüllt");
+    } catch {
+      toast.error("Netzwerkfehler bei der Analyse");
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
   return (
     <>
       <StepHead
         step={1}
         title="Über dich"
-        description="Drei Fragen — danach geht's weiter."
+        description="Starte mit deiner Website — wir füllen dein Angebot automatisch vor. Danach drei kurze Fragen."
       />
+
+      <Section title="Deine Website" hint="optional — spart Tipparbeit">
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Globe className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void analyzeWebsite(); } }}
+              placeholder="z. B. kanzlei-mustermann.at"
+              className="pl-9"
+              disabled={analyzing}
+            />
+          </div>
+          <Button type="button" variant="outline" onClick={() => void analyzeWebsite()} disabled={analyzing || !url.trim()} className="gap-1.5">
+            {analyzing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            {analyzing ? "Analysiere …" : "Analysieren"}
+          </Button>
+        </div>
+        {state.brand && (
+          <div className="mt-2.5 rounded-lg border border-primary/30 bg-primary/5 px-3.5 py-2.5">
+            <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-foreground">
+              <Check className="h-3.5 w-3.5 text-primary" strokeWidth={2.5} /> Angebot vorbefüllt
+            </div>
+            <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+              {state.brand.offering
+                ? (state.brand.offering.length > 130 ? state.brand.offering.slice(0, 130) + "…" : state.brand.offering)
+                : "Positionierung aus deiner Website übernommen."}
+              {" "}Feinschliff später in den Einstellungen.
+            </p>
+          </div>
+        )}
+      </Section>
 
       <Section title="Deine Rolle">
         <ToggleGroup
@@ -777,6 +858,7 @@ export default function OnboardingPage() {
 
       const onboardingSnapshot = {
         onboarded_at:        new Date().toISOString(),
+        website:             state.website,
         role:                state.role,
         business_type:       state.businessType,
         team_size:           state.teamSize,
@@ -809,7 +891,12 @@ export default function OnboardingPage() {
             default_status:     "new",
           },
           brand_settings: {
-            company_name:     companyName,
+            company_name:     state.brand?.company_name || companyName,
+            website:          state.website ?? undefined,
+            tagline:          state.brand?.tagline ?? undefined,
+            offering:         state.brand?.offering ?? undefined,
+            value_prop:       state.brand?.value_prop ?? undefined,
+            target_customer:  state.brand?.target_customer ?? undefined,
             role:             state.role ?? undefined,
             business_type:    state.businessType ?? undefined,
             team_size:        state.teamSize ?? undefined,
