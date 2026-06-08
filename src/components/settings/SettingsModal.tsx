@@ -6,8 +6,7 @@ import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import {
   Search, Check, Upload, Mail, Users, Linkedin, Package, CreditCard,
-  Lock, Shield, Key, Copy, RefreshCw, EyeIcon, EyeOffIcon, GitBranch,
-  Globe, Clock,
+  Lock, Shield, Key, RefreshCw, EyeIcon, EyeOffIcon, GitBranch,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -24,9 +23,6 @@ import {
 } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import EmailAccountsManager from "@/components/settings/EmailAccountsManager";
-import {
-  type SendWindow, DEFAULT_SEND_WINDOW, normalizeSendWindow,
-} from "@/lib/campaigns/send-window";
 import { renderSignatureHtml } from "@/lib/email/signature";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { createClient } from "@/lib/supabase/client";
@@ -53,8 +49,8 @@ const SECTIONS: { group: string; items: { k: SectionKey; label: string; icon: Re
   {
     group: "Kanäle",
     items: [
-      { k: "mailbox", label: "E-Mail-Konten", icon: Mail },
-      { k: "social",  label: "LinkedIn",      icon: Linkedin },
+      { k: "mailbox", label: "E-Mail-Outreach", icon: Mail },
+      { k: "social",  label: "LinkedIn-Outreach", icon: Linkedin },
     ],
   },
   {
@@ -774,7 +770,7 @@ function OfferingSection() {
 function MailboxSection() {
   return (
     <>
-      <PageHead title="E-Mail-Konten" sub="Postfächer für den Versand verbinden. Limits, Warmup und Tracking pro Postfach – Versand-Voreinstellungen darunter." />
+      <PageHead title="E-Mail-Konten" sub="Postfächer für den Versand verbinden. Limits & Warmup pro Postfach – Versandfenster, Tempo & Tracking stellst du beim Erstellen einer Kampagne ein." />
       <SectionCard>
         <EmailAccountsManager />
       </SectionCard>
@@ -783,32 +779,15 @@ function MailboxSection() {
   );
 }
 
-const WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
-
-/* Globale Versand-Defaults → campaign_settings (echt, /api/settings) */
+/* Globale Versand-Schutz-Limits → campaign_settings (echt, /api/settings).
+   Versandfenster, Tempo & Tracking werden pro Kampagne im Wizard festgelegt –
+   hier stehen nur globale Sicherheits-/Pflicht-Einstellungen. */
 function MailboxSendingSettings() {
   const [cs, setCs] = useState<Record<string, unknown>>({});
-  const [delayMinutes, setDelayMinutes] = useState(5);
-  const [jitter, setJitter] = useState(20);
   const [totalDailyLimit, setTotalDailyLimit] = useState(0);
-  const [sendWindow, setSendWindow] = useState<SendWindow>(DEFAULT_SEND_WINDOW);
-  const [bounceAction, setBounceAction] = useState("pause");
-  const [bounceThreshold, setBounceThreshold] = useState(5);
-  const [trackOpens, setTrackOpens] = useState(true);
-  const [trackClicks, setTrackClicks] = useState(true);
-  const [unsubLink, setUnsubLink] = useState(true);
   const [signature, setSignature] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  // Aktive Postfächer (für die Kapazitäts-Anzeige)
-  const [accounts, setAccounts] = useState<{ is_active: boolean; daily_limit: number }[]>([]);
-
-  useEffect(() => {
-    fetch("/api/email-accounts")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { if (Array.isArray(j?.data)) setAccounts(j.data); })
-      .catch(() => { /* silent */ });
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -818,16 +797,7 @@ function MailboxSendingSettings() {
         if (cancelled || !j?.data) return;
         const c = (j.data.campaign_settings ?? {}) as Record<string, unknown>;
         setCs(c);
-        if (typeof c.delay_minutes === "number") setDelayMinutes(c.delay_minutes);
-        if (typeof c.send_jitter === "number") setJitter(c.send_jitter);
         if (typeof c.total_daily_limit === "number") setTotalDailyLimit(c.total_daily_limit);
-        // send_window: Legacy-String ODER neues Objekt → immer normalisieren
-        setSendWindow(normalizeSendWindow(c.send_window as SendWindow | string | undefined));
-        if (typeof c.bounce_action === "string") setBounceAction(c.bounce_action);
-        if (typeof c.bounce_threshold === "number") setBounceThreshold(c.bounce_threshold);
-        if (typeof c.track_opens === "boolean") setTrackOpens(c.track_opens);
-        if (typeof c.track_clicks === "boolean") setTrackClicks(c.track_clicks);
-        if (typeof c.unsub_link === "boolean") setUnsubLink(c.unsub_link);
         // Signatur als HTML in den Rich-Text-Editor (Alt-Plaintext → HTML normalisiert)
         if (typeof c.signature === "string") setSignature(renderSignatureHtml(c.signature));
       })
@@ -836,28 +806,6 @@ function MailboxSendingSettings() {
     return () => { cancelled = true; };
   }, []);
 
-  function toggleDay(idx: number) {
-    setSendWindow((w) => {
-      const days = [...w.days];
-      days[idx] = !days[idx];
-      return { ...w, days };
-    });
-  }
-
-  const noDaySelected = !sendWindow.days.some(Boolean);
-
-  // ── Kapazität: was lässt das aktuelle Setup pro Tag zu? ──
-  const activeAccounts = accounts.filter((a) => a.is_active);
-  const mailboxCapacity = activeAccounts.reduce((s, a) => s + (Number(a.daily_limit) || 0), 0);
-  const effectiveCapacity = totalDailyLimit > 0 ? Math.min(mailboxCapacity, totalDailyLimit) : mailboxCapacity;
-  const activeDayLabels = WEEKDAYS.filter((_, i) => sendWindow.days[i]);
-  const windowMinutes = (() => {
-    const [fh, fm] = sendWindow.time_from.split(":").map(Number);
-    const [th, tm] = sendWindow.time_to.split(":").map(Number);
-    return Math.max(0, (th * 60 + (tm || 0)) - (fh * 60 + (fm || 0)));
-  })();
-  const windowHours = Math.round((windowMinutes / 60) * 10) / 10;
-
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
@@ -865,17 +813,12 @@ function MailboxSendingSettings() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          // ...cs bewahrt vorhandene Wizard-Fallbacks (send_window, delay_minutes,
+          // send_jitter, track_*) — die werden nicht mehr hier, sondern pro Kampagne gesetzt.
           campaign_settings: {
             ...cs,
-            delay_minutes: delayMinutes,
-            send_jitter: jitter,
             total_daily_limit: totalDailyLimit,
-            send_window: sendWindow,
-            bounce_action: bounceAction,
-            bounce_threshold: bounceThreshold,
-            track_opens: trackOpens,
-            track_clicks: trackClicks,
-            unsub_link: unsubLink,
+            unsub_link: true, // DSGVO-Pflicht: immer automatisch angehängt
             signature: signature.trim(),
           },
         }),
@@ -891,142 +834,11 @@ function MailboxSendingSettings() {
     } finally {
       setSaving(false);
     }
-  }, [cs, delayMinutes, jitter, totalDailyLimit, sendWindow, bounceAction, bounceThreshold, trackOpens, trackClicks, unsubLink, signature]);
+  }, [cs, totalDailyLimit, signature]);
 
   return (
     <>
-      {/* ── Versandfenster (eigener Block: Picker braucht volle Breite) ── */}
-      <SectionCard
-        title="Versandfenster"
-        desc="Tage und Uhrzeiten, an denen E-Mails rausgehen dürfen. Gilt als Standard für neue Kampagnen und als Sicherheitsgrenze für Kampagnen ohne eigenes Fenster."
-      >
-        <div className="py-2">
-          {/* Kapazität des aktuellen Setups */}
-          <div className="mb-4 flex items-start gap-2.5 rounded-lg border bg-muted/30 px-3.5 py-3">
-            <Mail className="mt-0.5 size-4 shrink-0 text-primary" />
-            <div className="text-[13px] leading-relaxed">
-              {activeAccounts.length === 0 ? (
-                <span className="text-muted-foreground">
-                  Noch kein aktives Postfach verbunden – aktuell kann <span className="font-medium text-foreground">nichts</span> versendet werden. Verbinde oben ein Postfach.
-                </span>
-              ) : (
-                <>
-                  <span className="font-medium text-foreground">
-                    Bis zu {effectiveCapacity.toLocaleString("de-DE")} Mails / Tag
-                  </span>{" "}
-                  <span className="text-muted-foreground">
-                    mit {activeAccounts.length} aktiven Postfächern
-                    {totalDailyLimit > 0 && mailboxCapacity > totalDailyLimit && ` (durch Gesamtlimit auf ${totalDailyLimit.toLocaleString("de-DE")} gedeckelt)`}.
-                  </span>
-                  <div className="mt-0.5 text-[12px] text-muted-foreground">
-                    Versand{" "}
-                    {activeDayLabels.length === 7 ? "täglich" : activeDayLabels.length ? activeDayLabels.join(" · ") : "an keinem Tag"}
-                    {windowMinutes > 0
-                      ? `, ${sendWindow.time_from}–${sendWindow.time_to} (${windowHours} h) · ${sendWindow.timezone}`
-                      : " · ungültiges Zeitfenster"}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-
-          <Label className="text-[13px] font-medium">Wochentage</Label>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {WEEKDAYS.map((d, idx) => (
-              <button
-                key={d}
-                type="button"
-                disabled={loading}
-                onClick={() => toggleDay(idx)}
-                className={cn(
-                  "h-9 w-11 rounded-md border text-[13px] font-medium transition-colors",
-                  sendWindow.days[idx]
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-border bg-background text-muted-foreground hover:bg-accent",
-                )}
-              >
-                {d}
-              </button>
-            ))}
-          </div>
-          {noDaySelected && (
-            <p className="mt-2 text-[11px] text-destructive">Mindestens einen Tag auswählen — sonst wird nie gesendet.</p>
-          )}
-
-          <div className="mt-4 grid gap-4 sm:grid-cols-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="sw-from" className="text-[13px] font-medium">Uhrzeit von</Label>
-              <div className="relative">
-                <Clock className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input id="sw-from" type="time" value={sendWindow.time_from} disabled={loading} className="pl-8"
-                  onChange={(e) => setSendWindow((w) => ({ ...w, time_from: e.target.value }))} />
-              </div>
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="sw-to" className="text-[13px] font-medium">Uhrzeit bis</Label>
-              <div className="relative">
-                <Clock className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input id="sw-to" type="time" value={sendWindow.time_to} disabled={loading} className="pl-8"
-                  onChange={(e) => setSendWindow((w) => ({ ...w, time_to: e.target.value }))} />
-              </div>
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="sw-tz" className="text-[13px] font-medium">Zeitzone</Label>
-              <Select value={sendWindow.timezone} onValueChange={(v) => setSendWindow((w) => ({ ...w, timezone: v }))}>
-                <SelectTrigger id="sw-tz" className="w-full"><Globe className="size-4 text-muted-foreground" /><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Europe/Vienna">Europe/Vienna</SelectItem>
-                  <SelectItem value="Europe/Berlin">Europe/Berlin</SelectItem>
-                  <SelectItem value="Europe/Zurich">Europe/Zurich</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Schnellauswahl */}
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <span className="text-[12px] text-muted-foreground">Schnellauswahl:</span>
-            {([
-              { label: "Geschäftszeiten", days: [true, true, true, true, true, false, false], from: "09:00", to: "17:00" },
-              { label: "Erweitert", days: [true, true, true, true, true, false, false], from: "08:00", to: "20:00" },
-              { label: "Rund um die Uhr", days: [true, true, true, true, true, true, true], from: "00:00", to: "23:59" },
-            ] as const).map((p) => {
-              const active = p.from === sendWindow.time_from && p.to === sendWindow.time_to
-                && p.days.every((d, i) => d === sendWindow.days[i]);
-              return (
-                <button
-                  key={p.label}
-                  type="button"
-                  disabled={loading}
-                  onClick={() => setSendWindow((w) => ({ ...w, days: [...p.days], time_from: p.from, time_to: p.to }))}
-                  className={cn(
-                    "rounded-full border px-3 py-1 text-[12px] font-medium transition-colors",
-                    active ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-accent",
-                  )}
-                >
-                  {p.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </SectionCard>
-
-      <SectionCard title="Versand-Einstellungen" desc="Voreinstellungen für neue Kampagnen. Absender, Antwortadresse und Tageslimit legst du oben je Postfach fest.">
-      <SettingRow title="Mindestpause zwischen E-Mails" desc="Kürzester Abstand in Minuten zwischen zwei Sendungen. Schützt die Zustellbarkeit – mindestens 1 Minute.">
-        <div className="flex items-center gap-2">
-          <Input type="number" min={1} max={120} value={delayMinutes} disabled={loading}
-            onChange={(e) => setDelayMinutes(Math.max(1, Math.min(120, Number(e.target.value) || 1)))} />
-          <span className="whitespace-nowrap text-sm text-muted-foreground">Min.</span>
-        </div>
-      </SettingRow>
-      <SettingRow title="Zufalls-Variation" desc="Streut Pause und Follow-up-Zeitpunkt zufällig (±), damit der Versand nicht maschinell wirkt. Empfohlen: 20 %.">
-        <div className="flex items-center gap-2">
-          <Input type="number" min={0} max={50} value={jitter} disabled={loading}
-            onChange={(e) => setJitter(Math.max(0, Math.min(50, Number(e.target.value) || 0)))} />
-          <span className="text-sm text-muted-foreground">%</span>
-        </div>
-      </SettingRow>
+      <SectionCard title="Versand-Schutz & Standards" desc="Globale Sicherheits-Obergrenze und Signatur. Abmeldelink (DSGVO-Pflicht) und Bounce-Schutz laufen automatisch im Hintergrund; Versandfenster, Tempo und Tracking stellst du pro Kampagne ein.">
       <SettingRow title="Tages-Gesamtlimit" desc="Obergrenze über alle aktiven Postfächer zusammen. 0 = aus (nur die Limits je Postfach gelten).">
         <div className="flex items-center gap-2">
           <Input type="number" min={0} max={5000} step={10} value={totalDailyLimit} disabled={loading}
@@ -1034,28 +846,6 @@ function MailboxSendingSettings() {
           <span className="whitespace-nowrap text-sm text-muted-foreground">/ Tag</span>
         </div>
       </SettingRow>
-      <SettingRow title="Bounce-Aktion" desc="Was passiert, wenn ein Postfach zu viele unzustellbare Mails sammelt.">
-        <Select value={bounceAction} onValueChange={setBounceAction}>
-          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="pause">Postfach pausieren</SelectItem>
-            <SelectItem value="deactivate">Postfach deaktivieren</SelectItem>
-            <SelectItem value="ignore">Nur warnen</SelectItem>
-          </SelectContent>
-        </Select>
-      </SettingRow>
-      {bounceAction !== "ignore" && (
-        <SettingRow title="Bounce-Schwelle" desc="Anzahl unzustellbarer Mails (rollierend 7 Tage), ab der die Aktion greift.">
-          <div className="flex items-center gap-2">
-            <Input type="number" min={1} max={100} value={bounceThreshold} disabled={loading}
-              onChange={(e) => setBounceThreshold(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} />
-            <span className="whitespace-nowrap text-sm text-muted-foreground">Bounces</span>
-          </div>
-        </SettingRow>
-      )}
-      <RowToggle title="Öffnungen tracken" desc="Erfasst Öffnungen per unsichtbarem Pixel. Kann die Zustellbarkeit senken." checked={trackOpens} onCheckedChange={setTrackOpens} />
-      <RowToggle title="Klicks tracken" desc="Zählt Klicks auf deine Links (Links werden dafür umgeschrieben)." checked={trackClicks} onCheckedChange={setTrackClicks} />
-      <RowToggle title="Abmeldelink anhängen" desc="Hängt jeder Mail einen Abmeldelink an – Pflicht nach DSGVO." checked={unsubLink} onCheckedChange={setUnsubLink} />
 
       <div className="grid gap-2 border-t pt-4">
         <Label htmlFor="mb-signature">Signatur</Label>
@@ -1090,25 +880,14 @@ interface LinkedInConnectionStatus {
 function SocialSection() {
   const [apiKey, setApiKey] = useState("");
   const [accountId, setAccountId] = useState("");
-  const [webhookSecret, setWebhookSecret] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
-  const [showWebhookSecret, setShowWebhookSecret] = useState(false);
 
   const [dailyLimit, setDailyLimit] = useState(15);
-  const [followUpDays, setFollowUpDays] = useState(3);
-  const [autoOutreach, setAutoOutreach] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [connection, setConnection] = useState<LinkedInConnectionStatus | null>(null);
-
-  const [senderName, setSenderName] = useState("");
-  const [senderPosition, setSenderPosition] = useState("");
-  const [senderCompany, setSenderCompany] = useState("");
-  const [senderSpecialization, setSenderSpecialization] = useState("");
-  const [senderTone, setSenderTone] = useState("");
-  const [outreachTemplate, setOutreachTemplate] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -1119,22 +898,10 @@ function SocialSection() {
         const s = j.data;
         if (s.connectsafely_api_key)       setApiKey(s.connectsafely_api_key);
         if (s.connectsafely_account_id)    setAccountId(s.connectsafely_account_id);
-        if (s.connectsafely_webhook_secret) setWebhookSecret(s.connectsafely_webhook_secret);
         if (typeof s.linkedin_daily_limit === "number")  setDailyLimit(s.linkedin_daily_limit);
-        if (typeof s.linkedin_follow_up_days === "number") setFollowUpDays(s.linkedin_follow_up_days);
-        if (typeof s.linkedin_auto_outreach === "boolean") setAutoOutreach(s.linkedin_auto_outreach);
         if (s.connectsafely_api_key && s.connectsafely_account_id) {
           setConnection({ ok: true, accountId: s.connectsafely_account_id });
         }
-        const sp = s.linkedin_sender_profile;
-        if (sp && typeof sp === "object" && !Array.isArray(sp)) {
-          if (typeof sp.name === "string") setSenderName(sp.name);
-          if (typeof sp.position === "string") setSenderPosition(sp.position);
-          if (typeof sp.company === "string") setSenderCompany(sp.company);
-          if (typeof sp.specialization === "string") setSenderSpecialization(sp.specialization);
-          if (typeof sp.tone === "string") setSenderTone(sp.tone);
-        }
-        if (typeof s.linkedin_outreach_template === "string") setOutreachTemplate(s.linkedin_outreach_template);
       })
       .catch(() => { /* silent */ })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -1185,18 +952,7 @@ function SocialSection() {
         body: JSON.stringify({
           connectsafely_api_key: apiKey.trim() || undefined,
           connectsafely_account_id: accountId.trim() || undefined,
-          connectsafely_webhook_secret: webhookSecret.trim() || undefined,
           linkedin_daily_limit: dailyLimit,
-          linkedin_follow_up_days: followUpDays,
-          linkedin_auto_outreach: autoOutreach,
-          linkedin_sender_profile: {
-            name: senderName.trim() || undefined,
-            position: senderPosition.trim() || undefined,
-            company: senderCompany.trim() || undefined,
-            specialization: senderSpecialization.trim() || undefined,
-            tone: senderTone.trim() || undefined,
-          },
-          linkedin_outreach_template: outreachTemplate.trim() || undefined,
         }),
       });
       if (!res.ok) {
@@ -1210,15 +966,11 @@ function SocialSection() {
     } finally {
       setSaving(false);
     }
-  }, [apiKey, accountId, webhookSecret, dailyLimit, followUpDays, autoOutreach, senderName, senderPosition, senderCompany, senderSpecialization, senderTone, outreachTemplate]);
-
-  const webhookUrl = typeof window !== "undefined"
-    ? `${window.location.origin}/api/linkedin/webhook`
-    : "/api/linkedin/webhook";
+  }, [apiKey, accountId, dailyLimit]);
 
   return (
     <>
-      <PageHead title="LinkedIn" sub="Verbindung, Outreach-Limits, Absender-Profil und Webhook für deine LinkedIn-Automation." />
+      <PageHead title="LinkedIn" sub="Verbinde dein LinkedIn-Konto – Einladungen, Follow-ups und Antworten laufen danach automatisch." />
 
       <SectionCard title="LinkedIn-Verbindung" desc="API-Key und Konto deiner ConnectSafely-Integration.">
         <SettingRow title="API-Key" desc="Dein ConnectSafely API-Key für automatisierten Outreach.">
@@ -1269,32 +1021,8 @@ function SocialSection() {
         </SettingRow>
       </SectionCard>
 
-      <SectionCard title="Outreach-Limits" desc="Sicherheits-Limits und Automatik für Einladungen & Follow-ups.">
-        {/* Auslastung des aktuellen Setups — Pendant zur Mailbox-Kapazität */}
-        <div className="mb-1 flex items-start gap-2.5 rounded-lg border bg-muted/30 px-3.5 py-3">
-          <Linkedin className="mt-0.5 size-4 shrink-0 text-primary" />
-          <div className="text-[13px] leading-relaxed">
-            {connection?.ok ? (
-              <>
-                <span className="font-medium text-foreground">≈ {(dailyLimit * 7).toLocaleString("de-DE")} Einladungen / Woche</span>{" "}
-                <span className="text-muted-foreground">
-                  bei {dailyLimit}/Tag{connection.accountName ? ` · verbunden als ${connection.accountName}` : ""}.
-                </span>
-                <div className={cn("mt-0.5 text-[12px]", dailyLimit * 7 > 90 ? "text-amber-600" : "text-muted-foreground")}>
-                  {dailyLimit * 7 > 90
-                    ? "Über dem sicheren LinkedIn-Wochenwert (~90) — erhöht das Sperr-Risiko. Eher 10–13/Tag."
-                    : "Im sicheren Bereich (LinkedIn-Limit ~90/Woche)."}
-                </div>
-              </>
-            ) : (
-              <span className="text-muted-foreground">
-                Noch nicht mit LinkedIn verbunden — oben den API-Key testen, dann laufen Einladungen &amp; Follow-ups.
-              </span>
-            )}
-          </div>
-        </div>
-
-        <SettingRow title="Einladungen pro Tag" desc="Empfohlen: 10–13. LinkedIn drosselt ab ~90 Einladungen/Woche pro Konto.">
+      <SectionCard title="Tageslimit" desc="Sobald dein LinkedIn-Konto verbunden ist, laufen Einladungen, Follow-ups und Antworten automatisch. Hier legst du nur die Sicherheits-Obergrenze pro Tag fest.">
+        <SettingRow title="Maximale Einladungen pro Tag" desc="Empfohlen: 10–13. LinkedIn drosselt ab ~90 Einladungen/Woche pro Konto.">
           <Input
             id="li-daily-limit"
             type="number"
@@ -1302,110 +1030,12 @@ function SocialSection() {
             max={20}
             value={dailyLimit}
             onChange={(e) => setDailyLimit(Math.max(1, Math.min(20, Number(e.target.value) || 0)))}
+            onBlur={() => {
+              if (dailyLimit * 7 > 90) {
+                toast.warning(`≈ ${(dailyLimit * 7).toLocaleString("de-DE")} Einladungen/Woche – über dem sicheren LinkedIn-Wert (~90). Eher 10–13/Tag, sonst steigt das Sperr-Risiko.`);
+              }
+            }}
           />
-        </SettingRow>
-        <SettingRow title="Follow-up nach Tagen" desc="Wartezeit nach angenommener Vernetzung bis zur ersten Nachricht.">
-          <Input
-            id="li-followup-days"
-            type="number"
-            min={1}
-            max={30}
-            value={followUpDays}
-            onChange={(e) => setFollowUpDays(Math.max(1, Math.min(30, Number(e.target.value) || 0)))}
-          />
-        </SettingRow>
-        <RowToggle
-          title="Automatischer Outreach"
-          desc="Versendet Einladungen & Follow-ups automatisch per Tages-Job."
-          checked={autoOutreach}
-          onCheckedChange={setAutoOutreach}
-        />
-        {/* Ehrliche Info statt Fake-Toggle: Antworten werden immer gespiegelt (Webhook) */}
-        <div className="flex items-start justify-between gap-6 border-t py-4">
-          <div className="min-w-0">
-            <p className="text-sm font-medium leading-snug">Antworten in der Inbox</p>
-            <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-              LinkedIn-Antworten landen automatisch in deiner CRM-Inbox und stoppen die Sequenz.
-            </p>
-          </div>
-          <span className="shrink-0 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-600">
-            Automatisch
-          </span>
-        </div>
-      </SectionCard>
-
-      <SectionCard title="Absender-Profil" desc="Wird vom KI-Texter für personalisierte Einladungen & Nachrichten verwendet.">
-        <SettingRow title="Name" desc="Dein Name, wie er in Nachrichten erscheint.">
-          <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} disabled={loading} placeholder="z. B. Markus Wallner" />
-        </SettingRow>
-        <SettingRow title="Position" desc="Deine Rolle / dein Titel.">
-          <Input value={senderPosition} onChange={(e) => setSenderPosition(e.target.value)} disabled={loading} placeholder="z. B. Geschäftsführer" />
-        </SettingRow>
-        <SettingRow title="Unternehmen" desc="Dein Firmenname.">
-          <Input value={senderCompany} onChange={(e) => setSenderCompany(e.target.value)} disabled={loading} placeholder="z. B. KI Kanzlei GmbH" />
-        </SettingRow>
-        <SettingRow title="Spezialisierung" desc="Worauf du dich fokussierst — schärft die KI-Ansprache.">
-          <Input value={senderSpecialization} onChange={(e) => setSenderSpecialization(e.target.value)} disabled={loading} placeholder="z. B. KI-Automatisierung für Kanzleien" />
-        </SettingRow>
-        <SettingRow title="Tonalität" desc="Stil der generierten Nachrichten.">
-          <Select value={senderTone} onValueChange={setSenderTone}>
-            <SelectTrigger className="w-full"><SelectValue placeholder="Tonalität wählen" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="professionell">Professionell</SelectItem>
-              <SelectItem value="locker">Locker</SelectItem>
-              <SelectItem value="direkt">Direkt</SelectItem>
-              <SelectItem value="freundlich">Freundlich</SelectItem>
-            </SelectContent>
-          </Select>
-        </SettingRow>
-      </SectionCard>
-
-      <SectionCard title="Erstnachricht-Vorlage" desc="Vorlage für die erste Nachricht. Platzhalter werden automatisch ersetzt.">
-        <div className="grid gap-2">
-          <Textarea
-            id="li-template"
-            rows={4}
-            value={outreachTemplate}
-            disabled={loading}
-            onChange={(e) => setOutreachTemplate(e.target.value)}
-            placeholder="Hallo {{firstName}}, ich habe gesehen, dass …"
-            className="resize-y"
-          />
-          <p className="text-[11px] text-muted-foreground">Platzhalter wie {`{{firstName}}`} oder {`{{company}}`} werden automatisch ersetzt.</p>
-        </div>
-      </SectionCard>
-
-      <SectionCard title="Webhook für eingehende Nachrichten" desc="Hinterlege diese URL bei deinem LinkedIn-Anbieter für Antworten in Echtzeit.">
-        <SettingRow title="Webhook-URL" desc="Diese URL beim Anbieter eintragen.">
-          <div className="flex gap-2">
-            <Input value={webhookUrl} readOnly className="text-[13px]" />
-            <Button
-              variant="outline"
-              onClick={() => { navigator.clipboard.writeText(webhookUrl); toast.success("URL kopiert"); }}
-            >
-              <Copy className="size-3.5" />
-            </Button>
-          </div>
-        </SettingRow>
-        <SettingRow title="Webhook Signing Secret" desc="Für die HMAC-SHA256-Signatur-Verifizierung. Bei Verlust einfach neu generieren.">
-          <div className="relative">
-            <Input
-              id="li-webhook-secret"
-              type={showWebhookSecret ? "text" : "password"}
-              placeholder="whsec_…"
-              className="pr-9 text-[13px]"
-              value={webhookSecret}
-              onChange={(e) => setWebhookSecret(e.target.value)}
-              disabled={loading}
-            />
-            <button
-              type="button"
-              onClick={() => setShowWebhookSecret((v) => !v)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 size-6 inline-grid place-items-center rounded text-muted-foreground hover:bg-muted"
-            >
-              {showWebhookSecret ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
-            </button>
-          </div>
         </SettingRow>
       </SectionCard>
 
@@ -1538,12 +1168,11 @@ function LeadsSection() {
 }
 
 /* ─── Integrationen: Logo-Karten + OAuth-Connect (CRM) / Link (Automatisierung) ─── */
-function IntegrationLogo({ slug, color, name }: { slug: string; color: string; name: string }) {
+function IntegrationLogo({ id, name }: { id: string; name: string }) {
   return (
-    <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border bg-white">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={`https://cdn.simpleicons.org/${slug}/${color}`} alt={name} className="size-5" loading="lazy" />
-    </span>
+    // Echtes Marken-Logo als lokales SVG (kein externer CDN-Hotlink).
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={`/integrations/${id}.svg`} alt={name} className="h-5 w-auto max-w-[150px] object-contain object-left" loading="lazy" />
   );
 }
 
@@ -1552,18 +1181,18 @@ function IntegrationCard({ p, connected, loading, onConnect, onManage }: {
 }) {
   return (
     <div className="flex flex-col rounded-[10px] border bg-card p-4 shadow-sm">
-      <div className="flex items-center gap-3">
-        <IntegrationLogo slug={p.slug} color={p.color} name={p.name} />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold leading-none">{p.name}</p>
-          <p className="mt-1 text-[11px]">
-            {p.kind === "crm"
-              ? (connected
-                  ? <span className="inline-flex items-center gap-1 font-medium text-emerald-600"><Check className="size-3" /> Verbunden</span>
-                  : <span className="text-muted-foreground">Nicht verbunden · OAuth</span>)
-              : <span className="text-muted-foreground">Automatisierung</span>}
-          </p>
+      <div className="flex min-h-6 items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <IntegrationLogo id={p.id} name={p.name} />
+          {p.symbolOnly && <span className="truncate text-sm font-semibold">{p.name}</span>}
         </div>
+        <span className="shrink-0 text-[11px]">
+          {p.kind === "crm"
+            ? (connected
+                ? <span className="inline-flex items-center gap-1 font-medium text-emerald-600"><Check className="size-3" /> Verbunden</span>
+                : <span className="text-muted-foreground">Nicht verbunden · OAuth</span>)
+            : <span className="text-muted-foreground">Automatisierung</span>}
+        </span>
       </div>
       <p className="mt-3 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{p.desc}</p>
       {p.kind === "crm" && connected
@@ -1634,12 +1263,11 @@ function CrmSection() {
   }
 
   const crm = INTEGRATIONS.filter((p) => p.kind === "crm");
-  const automation = INTEGRATIONS.filter((p) => p.kind === "automation");
   const manageProvider = INTEGRATIONS.find((p) => p.id === manageId) ?? null;
 
   return (
     <>
-      <PageHead title="Integrationen" sub="CRM per Klick verbinden (OAuth — kein Token nötig) und mit Zapier, Make oder n8n automatisieren." />
+      <PageHead title="Integrationen" sub="CRM mit einem Klick verbinden — die Autorisierung läuft über OAuth beim Anbieter, ganz ohne Token." />
 
       <SectionCard title="CRM" desc="Mit einem Klick verbinden — die Autorisierung läuft über OAuth beim Anbieter.">
         <div className="grid gap-3 pt-1 sm:grid-cols-2">
@@ -1650,26 +1278,14 @@ function CrmSection() {
         </div>
       </SectionCard>
 
-      <SectionCard title="Automatisierung" desc="Verbinde KI Kanzlei mit tausenden Apps — ganz ohne Token.">
-        <div className="grid gap-3 pt-1 sm:grid-cols-3">
-          {automation.map((p) => (
-            <IntegrationCard key={p.id} p={p} connected={false} loading={loading}
-              onConnect={() => connect(p)} onManage={() => { /* automation: kein Manage */ }} />
-          ))}
-        </div>
-      </SectionCard>
-
       {/* Sub-Fenster für verbundenes CRM */}
       <Dialog open={!!manageProvider} onOpenChange={(o) => { if (!o) setManageId(null); }}>
         <DialogContent className="sm:max-w-md">
           {manageProvider && (
             <>
-              <div className="flex items-center gap-3">
-                <IntegrationLogo slug={manageProvider.slug} color={manageProvider.color} name={manageProvider.name} />
-                <div className="min-w-0">
-                  <DialogTitle>{manageProvider.name}</DialogTitle>
-                  <p className="text-xs font-medium text-emerald-600">Verbunden</p>
-                </div>
+              <div className="min-w-0">
+                <DialogTitle>{manageProvider.name}</DialogTitle>
+                <p className="text-xs font-medium text-emerald-600">Verbunden</p>
               </div>
               <p className="pt-1 text-sm leading-relaxed text-muted-foreground">{manageProvider.desc}</p>
               <div className="flex items-center justify-between gap-2 pt-2">

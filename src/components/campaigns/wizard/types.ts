@@ -11,6 +11,7 @@ export interface MailboxOption {
   provider: EmailProvider;
   sender_email: string;
   sender_name: string | null;
+  reply_to: string | null;
   label: string | null;
   is_active: boolean;
   warmup_enabled: boolean;
@@ -27,6 +28,7 @@ export interface MailboxState {
   email: string;
   provider: EmailProvider | null;
   senderName: string;
+  replyTo: string;
 }
 
 export interface BasicsState {

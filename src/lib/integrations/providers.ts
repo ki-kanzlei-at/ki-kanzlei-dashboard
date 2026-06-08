@@ -22,6 +22,8 @@ export interface IntegrationProvider {
   connectedKey?: string;  // user_settings-Spalte zur Verbunden-Prüfung
   /* Link (Automatisierung) */
   externalUrl?: string;
+  /* Logo enthält keinen Markennamen (z. B. Salesforce-Wolke) → Name separat anzeigen */
+  symbolOnly?: boolean;
 }
 
 export const INTEGRATIONS: IntegrationProvider[] = [
@@ -50,6 +52,7 @@ export const INTEGRATIONS: IntegrationProvider[] = [
   },
   {
     id: "salesforce", name: "Salesforce", kind: "crm", slug: "salesforce", color: "00A1E0",
+    symbolOnly: true,
     desc: "Leads & Opportunities mit der Sales Cloud syncen.",
     auth: "oauth",
     authorizeUrl: "https://login.salesforce.com/services/oauth2/authorize",

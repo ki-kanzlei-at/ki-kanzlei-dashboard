@@ -233,14 +233,16 @@ export async function getUserSettingsByUserId(
   return data as UserSettings;
 }
 
-/* ── Alle User mit auto_outreach holen (für Cron Jobs) ── */
+/* ── Alle User mit verbundenem LinkedIn-Konto holen (für Cron Jobs) ──
+ * Outreach läuft automatisch, sobald ein Konto verbunden ist – es gibt
+ * keinen separaten Auto-Schalter mehr in den Settings. Begrenzt bleibt
+ * alles über das Tageslimit (linkedin_daily_limit) und den Wochen-Quota-Guard. */
 export async function getAllAutoOutreachUsers(): Promise<UserSettings[]> {
   const admin = getSupabaseAdmin();
 
   const { data, error } = await admin
     .from("user_settings")
     .select("*")
-    .eq("linkedin_auto_outreach", true)
     .not("connectsafely_api_key", "is", null)
     .not("connectsafely_account_id", "is", null);
 

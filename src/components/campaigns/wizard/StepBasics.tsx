@@ -41,8 +41,8 @@ export function StepBasics({ state, onChange }: StepBasicsProps) {
         </div>
         <h1 className="step-heading">Kampagnen-Basics</h1>
         <p className="step-desc">
-          Gib der Kampagne einen klaren Namen und definiere Absender:in.
-          Den Inhalt der Mails schreibt die KI später eigenständig.
+          Gib der Kampagne einen klaren Namen und wähle Sprache & Tonalität.
+          Absender und Antwort-Adresse kommen automatisch aus dem gewählten Postfach.
         </p>
       </div>
 
@@ -61,46 +61,23 @@ export function StepBasics({ state, onChange }: StepBasicsProps) {
           />
         </div>
 
-        <div className="wiz-fields-row">
-          <div className="space-y-2">
-            <Label htmlFor="sender-name" className="text-[12px] font-medium text-foreground">
-              Absender-Name
-            </Label>
-            <Input
-              id="sender-name"
-              value={state.senderName}
-              onChange={(e) => onChange({ ...state, senderName: e.target.value })}
-              placeholder="z. B. Maria Bauer"
-              className="h-10"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="sender-email" className="text-[12px] font-medium text-foreground">
-              Absender-E-Mail
-            </Label>
-            <Input
-              id="sender-email"
-              value={state.senderEmail}
-              readOnly
-              disabled
-              placeholder="Wird aus der gewählten Mailbox übernommen"
-              className="h-10 bg-muted"
-            />
-          </div>
-        </div>
-
         <div className="space-y-2">
-          <Label htmlFor="reply-to" className="text-[12px] font-medium text-foreground">
-            Antwort-Adresse{" "}
-            <span className="font-normal text-muted-foreground">(optional)</span>
-          </Label>
-          <Input
-            id="reply-to"
-            value={state.replyTo}
-            onChange={(e) => onChange({ ...state, replyTo: e.target.value })}
-            placeholder="Standard: gleiche Adresse wie Absender"
-            className="h-10"
-          />
+          <Label className="text-[12px] font-medium text-foreground">Absender &amp; Antwort-Adresse</Label>
+          <div className="rounded-[10px] border bg-muted/40 px-3.5 py-3 text-[13px]">
+            <div className="flex flex-wrap items-center gap-x-2">
+              <span className="font-medium text-foreground">
+                {state.senderName || <span className="font-normal text-muted-foreground">Kein Absender-Name hinterlegt</span>}
+              </span>
+              <span className="text-muted-foreground">·</span>
+              <span className="text-muted-foreground">{state.senderEmail || "—"}</span>
+            </div>
+            <div className="mt-0.5 text-[12px] text-muted-foreground">
+              Antworten an: {state.replyTo || state.senderEmail || "gleiche Adresse wie Absender"}
+            </div>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Stammt aus dem gewählten Postfach – zentral in den E-Mail-Einstellungen änderbar.
+          </p>
         </div>
 
         <div className="space-y-2">

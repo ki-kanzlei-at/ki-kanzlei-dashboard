@@ -100,9 +100,10 @@ export function StepMailbox({ state, onChange }: StepMailboxProps) {
       mailboxId: mb.id,
       email: mb.sender_email,
       provider: mb.provider,
-      // Echten Absendernamen des Kontos nehmen — NICHT die E-Mail (sonst steht
-      // die Adresse im Namensfeld). Leer lassen, falls keiner hinterlegt ist.
+      // Absendername & Antwort-Adresse direkt aus dem Konto — werden im Wizard
+      // nicht mehr separat abgefragt (zentral in den E-Mail-Einstellungen gepflegt).
       senderName: mb.sender_name?.trim() || "",
+      replyTo: mb.reply_to?.trim() || "",
     });
   }
 
