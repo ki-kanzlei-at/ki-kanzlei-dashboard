@@ -85,10 +85,11 @@ interface EmailAccountSummary {
 
 /* ── Status-Labels & Sort-Reihenfolge ── */
 const STATUS_LABEL: Record<CampaignStatus, string> = {
-  active: "Aktiv",
-  paused: "Pausiert",
-  draft: "Entwurf",
+  active:    "Aktiv",
+  paused:    "Pausiert",
+  draft:     "Entwurf",
   completed: "Abgeschlossen",
+  archived:  "Archiviert",
 };
 
 const STATUS_TABS: { value: "all" | CampaignStatus; label: string }[] = [
@@ -434,24 +435,16 @@ export default function CampaignsPage() {
       <div className="px-4 lg:px-6 space-y-4">
         <div className="flex items-start justify-between gap-6">
           <div className="space-y-1">
-            <h1 className="text-[24px] font-medium tracking-tight leading-tight">Kampagnen</h1>
+            <h1 className="text-[24px] font-semibold tracking-tight leading-tight">Kampagnen</h1>
             <p className="text-[13.5px] text-muted-foreground max-w-xl">
-              Verwalte E-Mail-Sequenzen, Zielgruppen und Performance — alles an einem Ort.
+              Verwalte E-Mail-Sequenzen, Zielgruppen und Performance an einem Ort.
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <Button
-              variant="outline"
               size="sm"
               className="h-8 gap-1.5 text-xs font-medium"
-            >
-              <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
-              Bericht
-            </Button>
-            <Button
-              size="sm"
-              className="h-8 gap-1.5 text-xs font-medium"
-              onClick={() => setCreateOpen(true)}
+              onClick={() => router.push("/dashboard/campaigns/new")}
             >
               <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
               Neue Kampagne
@@ -654,7 +647,7 @@ export default function CampaignsPage() {
                     Filter zurücksetzen
                   </Button>
                 ) : (
-                  <Button onClick={() => setCreateOpen(true)}>
+                  <Button onClick={() => router.push("/dashboard/campaigns/new")}>
                     <Plus className="h-4 w-4 mr-2" />
                     Erste Kampagne erstellen
                   </Button>

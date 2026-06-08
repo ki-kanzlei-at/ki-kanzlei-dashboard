@@ -45,3 +45,10 @@ playwright-report/
 
 # design reference bundle (Claude Design handoff)
 .design-ref/
+
+# lokale Dev-/Screenshot-Artefakte (nicht committen)
+dev-server.log
+dev-*.log
+/shot-*.png
+/wiz*.png
+/Usersmarku*

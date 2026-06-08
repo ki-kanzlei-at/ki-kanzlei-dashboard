@@ -3,6 +3,8 @@
 import type { EmailAccount } from "@/lib/supabase/email-accounts";
 import { sendEmail as sendViaGraph } from "./microsoft-graph";
 import { sendEmail as sendViaSmtp } from "./smtp";
+import { sendViaMicrosoftOAuth } from "./microsoft-oauth";
+import { sendViaGoogleOAuth } from "./google-oauth";
 
 interface SendOptions {
   to: string;
@@ -21,6 +23,16 @@ export async function sendEmailViaAccount(
   const replyTo = options.replyTo || account.reply_to || undefined;
 
   switch (account.provider) {
+    case "microsoft_oauth": {
+      await sendViaMicrosoftOAuth(account, { ...options, replyTo });
+      break;
+    }
+
+    case "google_oauth": {
+      await sendViaGoogleOAuth(account, { ...options, replyTo });
+      break;
+    }
+
     case "microsoft_graph": {
       if (!account.ms_tenant_id || !account.ms_client_id || !account.ms_client_secret) {
         throw new Error("Microsoft Graph Credentials unvollständig");

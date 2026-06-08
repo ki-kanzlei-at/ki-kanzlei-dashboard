@@ -114,7 +114,7 @@ export type LeadUpdate = Partial<Pick<Lead,
   | "address" | "street" | "city" | "postal_code" | "state" | "country"
   | "industry" | "legal_form"
   | "ceo_name" | "ceo_title" | "ceo_first_name" | "ceo_last_name" | "ceo_gender" | "ceo_source"
-  | "status" | "notes"
+  | "status" | "notes" | "raw_data"
   | "social_linkedin" | "social_facebook" | "social_instagram"
   | "social_twitter" | "social_youtube" | "social_tiktok"
 >>;

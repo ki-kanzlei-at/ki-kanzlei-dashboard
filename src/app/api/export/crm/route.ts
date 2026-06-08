@@ -11,6 +11,7 @@ import { pushLeadsToPipedrive } from "@/lib/crm/pipedrive";
 import { pushLeadsToSalesforce } from "@/lib/crm/salesforce";
 import { pushLeadsToZoho } from "@/lib/crm/zoho";
 import { pushLeadsToWebhook } from "@/lib/crm/webhook";
+import { getIntegrationAccessToken } from "@/lib/integrations/tokens";
 
 export async function POST(request: NextRequest) {
   try {
@@ -38,7 +39,7 @@ export async function POST(request: NextRequest) {
     const settings = await getUserSettings(user.id);
 
     /* Leads laden */
-    let allLeads: Lead[] = [];
+    const allLeads: Lead[] = [];
 
     if (selectionMode === "ids" && ids?.length) {
       // Fetch by IDs in batches
@@ -71,22 +72,26 @@ export async function POST(request: NextRequest) {
 
     switch (provider) {
       case "hubspot": {
-        const key = settings?.hubspot_api_key;
-        if (!key) return NextResponse.json({ error: "HubSpot API Key nicht konfiguriert" }, { status: 400 });
+        // OAuth-Token (auto-refresh) bevorzugen, sonst manueller Token.
+        const oauth = await getIntegrationAccessToken(user.id, "hubspot");
+        const key = oauth?.accessToken ?? settings?.hubspot_api_key;
+        if (!key) return NextResponse.json({ error: "HubSpot nicht verbunden" }, { status: 400 });
         result = await pushLeadsToHubSpot(allLeads, key);
         break;
       }
       case "pipedrive": {
-        const key = settings?.pipedrive_api_key;
-        const domain = settings?.pipedrive_domain;
-        if (!key || !domain) return NextResponse.json({ error: "Pipedrive Credentials nicht konfiguriert" }, { status: 400 });
+        const oauth = await getIntegrationAccessToken(user.id, "pipedrive");
+        const key = oauth?.accessToken ?? settings?.pipedrive_api_key;
+        const domain = oauth?.domain ?? settings?.pipedrive_domain;
+        if (!key || !domain) return NextResponse.json({ error: "Pipedrive nicht verbunden" }, { status: 400 });
         result = await pushLeadsToPipedrive(allLeads, key, domain);
         break;
       }
       case "salesforce": {
-        const url = settings?.salesforce_instance_url;
-        const token = settings?.salesforce_access_token;
-        if (!url || !token) return NextResponse.json({ error: "Salesforce Credentials nicht konfiguriert" }, { status: 400 });
+        const oauth = await getIntegrationAccessToken(user.id, "salesforce");
+        const url = oauth?.instanceUrl ?? settings?.salesforce_instance_url;
+        const token = oauth?.accessToken ?? settings?.salesforce_access_token;
+        if (!url || !token) return NextResponse.json({ error: "Salesforce nicht verbunden" }, { status: 400 });
         result = await pushLeadsToSalesforce(allLeads, url, token);
         break;
       }

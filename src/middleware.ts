@@ -32,26 +32,73 @@ export async function middleware(request: NextRequest) {
 
   const { pathname, searchParams } = request.nextUrl;
 
-  // Nicht eingeloggt → zum Login umleiten (außer Login-Seite selbst)
+  /* ── Onboarding- + Subscription-Status ableiten ──
+   * onboarded_at:        gesetzt sobald User Funnel abgeschlossen hat
+   * subscription_status: 'pending_checkout' | 'active' | 'trialing' | 'past_due' | 'canceled'
+   *
+   * Routing-Regeln:
+   *   !onboarded                  → /onboarding
+   *   onboarded + pending_checkout → /onboarding (Plan-Step gateet via Middleware,
+   *                                   User kommt im selben Funnel zur Bezahlung)
+   *   onboarded + active/trialing  → /dashboard
+   *   onboarded + canceled/past_due → /onboarding (Abo erneuern via Plan-Step)
+   */
+  const onboardedAt = user?.user_metadata?.onboarded_at as string | undefined;
+  const isOnboarded = Boolean(onboardedAt);
+  const subscriptionStatus = (user?.user_metadata?.subscription_status as string | undefined) ?? null;
+  const hasActiveAccess = ["active", "trialing"].includes(subscriptionStatus ?? "");
+  const needsCheckout = isOnboarded && !hasActiveAccess;
+
+  // Nicht eingeloggt → zum Login
   if (!user && pathname.startsWith("/dashboard")) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
+  if (!user && pathname.startsWith("/onboarding")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/login";
+    url.searchParams.set("next", "/onboarding");
+    return NextResponse.redirect(url);
+  }
+  if (!user && pathname.startsWith("/billing")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/login";
+    return NextResponse.redirect(url);
+  }
 
-  // Eingeloggt + auf Login/Register-Seite → zum Dashboard umleiten
-  // ABER: Bei Passwort-Recovery auf der Login-Seite bleiben lassen
+  // Eingeloggt + auf Login/Register-Seite → richtiges Ziel
   const isRecovery = searchParams.get("recovery") === "true";
+  function destinationForUser(): string {
+    if (!hasActiveAccess) return "/onboarding";
+    return "/dashboard";
+  }
   if (user && pathname === "/login" && !isRecovery) {
     const url = request.nextUrl.clone();
-    url.pathname = "/dashboard";
+    url.pathname = destinationForUser();
     return NextResponse.redirect(url);
   }
   if (user && pathname === "/register") {
     const url = request.nextUrl.clone();
+    url.pathname = destinationForUser();
+    return NextResponse.redirect(url);
+  }
+
+  // Eingeloggt + auf /dashboard, aber Onboarding noch nicht durch ODER kein aktives Abo → ins Funnel
+  if (user && !hasActiveAccess && pathname.startsWith("/dashboard")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/onboarding";
+    return NextResponse.redirect(url);
+  }
+
+  // Eingeloggt + bereits onboarded + Zugang aktiv + auf /onboarding → ins Dashboard
+  if (user && isOnboarded && hasActiveAccess && pathname.startsWith("/onboarding")) {
+    const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
     return NextResponse.redirect(url);
   }
+  // suppress unused-var lint (kept for clarity in routing-rules)
+  void needsCheckout;
 
   // Security Headers
   supabaseResponse.headers.set("X-Frame-Options", "DENY");
@@ -73,6 +120,8 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|images|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    // /api/billing/webhook MUSS ohne Auth-Middleware durchgereicht werden
+    // (Stripe → Server, kein User-Cookie). Signature-Check passiert in der Route.
+    "/((?!_next/static|_next/image|favicon.ico|images|api/billing/webhook|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

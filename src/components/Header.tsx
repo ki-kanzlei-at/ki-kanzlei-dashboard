@@ -16,13 +16,19 @@ import {
 import {
     Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription,
 } from "@/components/ui/empty";
+import { CreditsBadge } from "@/components/CreditsBadge";
 
 /* ── Route meta ── */
 const routeMeta: Record<string, { label: string; parent?: string }> = {
-    "/dashboard":                { label: "Dashboard" },
-    "/dashboard/leads":          { label: "Leads",           parent: "Dashboard" },
-    "/dashboard/email-outreach": { label: "Emails",          parent: "Dashboard" },
-    "/dashboard/settings":       { label: "Einstellungen",   parent: "Dashboard" },
+    "/dashboard":                  { label: "Dashboard" },
+    "/dashboard/inbox":            { label: "Inbox",         parent: "Dashboard" },
+    "/dashboard/leads":            { label: "Leads",         parent: "Dashboard" },
+    "/dashboard/ai-researcher":    { label: "AI Researcher", parent: "Dashboard" },
+    "/dashboard/campaigns":        { label: "E-Mail-Kampagnen", parent: "Dashboard" },
+    "/dashboard/campaigns/new":    { label: "Neue Kampagne", parent: "Dashboard" },
+    "/dashboard/linkedin":         { label: "LinkedIn",      parent: "Dashboard" },
+    "/dashboard/email-outreach":   { label: "Emails",        parent: "Dashboard" },
+    "/dashboard/settings":         { label: "Einstellungen", parent: "Dashboard" },
 };
 
 function NotificationDropdown() {
@@ -100,6 +106,7 @@ export function Header() {
             </div>
 
             <div className="flex items-center gap-1">
+                <CreditsBadge />
                 <NotificationDropdown />
             </div>
         </header>

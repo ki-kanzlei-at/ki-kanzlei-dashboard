@@ -13,6 +13,14 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/email-warmup",
+      "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/email-inbox-sync",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/cron/social-media-publish",
       "schedule": "*/5 * * * *"
     }

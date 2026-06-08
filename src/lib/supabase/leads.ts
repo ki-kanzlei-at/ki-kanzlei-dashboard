@@ -197,6 +197,28 @@ export async function getLeadById(id: string): Promise<Lead | null> {
 }
 
 /**
+ * Sucht einen bereits existierenden Lead (gegen Duplikate aus dem AI Researcher).
+ * Match per Website-Domain (bevorzugt) oder exaktem Firmennamen. RLS scoped auf User.
+ */
+export async function findExistingLead(company: string, website: string | null): Promise<Lead | null> {
+  const supabase = await createClient();
+  const dom = website
+    ? website.replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/.*$/, "").trim().toLowerCase()
+    : null;
+
+  if (dom) {
+    const { data } = await supabase.from("leads").select("*").ilike("website", `%${dom}%`).limit(1);
+    if (data && data.length) return data[0] as Lead;
+  }
+  const name = company.trim();
+  if (name) {
+    const { data } = await supabase.from("leads").select("*").ilike("company", name).limit(1);
+    if (data && data.length) return data[0] as Lead;
+  }
+  return null;
+}
+
+/**
  * Mehrere Leads auf einmal einfügen (Bulk Insert).
  * Gibt die eingefügten Leads zurück.
  */
@@ -449,6 +471,22 @@ export async function getDistinctIndustries(
     if (row.industry) unique.add(row.industry);
   }
 
+  return Array.from(unique).sort((a, b) => a.localeCompare(b, "de"));
+}
+
+/**
+ * Distinct Rechtsformen aus der DB holen (nur tatsächlich vorhandene Werte).
+ */
+export async function getDistinctLegalForms(country?: string): Promise<string[]> {
+  const supabase = await createClient();
+  let query = supabase.from("leads").select("legal_form");
+  if (country) query = query.eq("country", country);
+  const { data, error } = await query;
+  if (error) throw new Error(`Fehler beim Laden der Rechtsformen: ${error.message}`);
+  const unique = new Set<string>();
+  for (const row of data ?? []) {
+    if (row.legal_form) unique.add(row.legal_form);
+  }
   return Array.from(unique).sort((a, b) => a.localeCompare(b, "de"));
 }
 

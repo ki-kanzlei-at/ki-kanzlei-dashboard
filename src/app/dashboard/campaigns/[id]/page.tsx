@@ -16,6 +16,7 @@ import {
   Users,
   Send,
   MailOpen,
+  MousePointerClick,
   Reply,
   TrendingUp,
   TrendingDown,
@@ -60,15 +61,17 @@ const STATUS_CONFIG: Record<CampaignStatus, { label: string; className: string }
   active:    { label: "Aktiv",    className: "bg-primary/10 text-primary border-primary/20" },
   paused:    { label: "Pausiert", className: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-400" },
   completed: { label: "Fertig",   className: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-400" },
+  archived:  { label: "Archiviert", className: "bg-zinc-50 text-zinc-500 border-zinc-200 dark:bg-zinc-900 dark:text-zinc-500" },
 };
 
 const LEAD_STATUS_CONFIG: Record<CampaignLeadStatus, { label: string; className: string }> = {
-  pending:  { label: "Ausstehend", className: "text-muted-foreground" },
-  sent:     { label: "Gesendet",   className: "text-blue-600" },
-  failed:   { label: "Fehler",     className: "text-red-600" },
-  opened:   { label: "Geöffnet",   className: "text-amber-600" },
-  bounced:  { label: "Bounce",     className: "text-red-500" },
-  replied:  { label: "Antwort",    className: "text-emerald-600" },
+  pending:   { label: "Ausstehend", className: "text-muted-foreground" },
+  sent:      { label: "Gesendet",   className: "text-blue-600" },
+  failed:    { label: "Fehler",     className: "text-red-600" },
+  opened:    { label: "Geöffnet",   className: "text-amber-600" },
+  bounced:   { label: "Bounce",     className: "text-red-500" },
+  replied:   { label: "Antwort",    className: "text-emerald-600" },
+  completed: { label: "Fertig",     className: "text-muted-foreground" },
 };
 
 function pct(count: number, total: number): string {
@@ -312,6 +315,13 @@ export default function CampaignDetailPage() {
             trend: `${campaign.open_count} geöffnet`,
             trendUp: campaign.sent_count > 0 && (campaign.open_count / campaign.sent_count) > 0.2,
             Icon: MailOpen,
+          },
+          {
+            value: pct(campaign.click_count, campaign.sent_count),
+            label: "Click Rate",
+            trend: `${campaign.click_count} geklickt`,
+            trendUp: campaign.sent_count > 0 && campaign.click_count > 0,
+            Icon: MousePointerClick,
           },
           {
             value: pct(campaign.reply_count, campaign.sent_count),

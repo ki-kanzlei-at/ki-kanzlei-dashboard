@@ -8,13 +8,12 @@ import { toast } from "sonner";
 import {
   Building2,
   Phone,
-  MapPin,
-  Share2,
-  User,
   Mail,
   ChevronDown,
   ExternalLink,
   Sparkles,
+  MessageCircle,
+  Clock,
   Loader2,
 } from "lucide-react";
 
@@ -351,6 +350,14 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved, mode = "edit"
     }
   }
 
+  // KI-Recherche-Daten am Lead (vom AI Researcher gespeichert)
+  const ai = (lead?.raw_data?.ai_research ?? null) as {
+    score?: number | null; summary?: string | null; employees?: string | null; revenue?: string | null;
+    founded_year?: string | null; pain_points?: string | null; our_solution?: string | null;
+    sources?: { n: number; title: string; url?: string; kind?: string }[]; updated_at?: string;
+  } | null;
+  const hasAi = !!ai && !!(ai.summary || ai.pain_points || ai.our_solution || (ai.sources && ai.sources.length));
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="leads-v3 w-full sm:max-w-[600px] lg:max-w-[640px] flex flex-col p-0 gap-0">
@@ -360,9 +367,17 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved, mode = "edit"
           <div className="flex items-start gap-3.5">
             <CompanyFavicon website={watchedWebsite || lead?.website || null} size={10} />
             <div className="min-w-0 flex-1 space-y-1">
-              <SheetTitle className="text-[17px] font-medium tracking-tight truncate leading-tight">
-                {displayCompany}
-              </SheetTitle>
+              <div className="flex items-center gap-2 min-w-0 pr-7">
+                <SheetTitle className="text-[17px] font-medium tracking-tight truncate leading-tight">
+                  {displayCompany}
+                </SheetTitle>
+                {currentStatus && (
+                  <span className={cn("badge-status shrink-0", STATUS_BADGE_CLASS[currentStatus.value])}>
+                    <span className="dot" />
+                    {currentStatus.label}
+                  </span>
+                )}
+              </div>
               <SheetDescription asChild>
                 <div className="flex items-center gap-2 flex-wrap text-[12.5px] text-muted-foreground">
                   {displayIndustry && <span>{displayIndustry}</span>}
@@ -392,12 +407,6 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved, mode = "edit"
                 </div>
               </SheetDescription>
             </div>
-            {currentStatus && (
-              <span className={cn("badge-status shrink-0 mr-7", STATUS_BADGE_CLASS[currentStatus.value])}>
-                <span className="dot" />
-                {currentStatus.label}
-              </span>
-            )}
           </div>
         </SheetHeader>
 
@@ -452,36 +461,106 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved, mode = "edit"
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col flex-1 min-h-0">
 
-            <Tabs defaultValue="company" className="flex flex-col flex-1 min-h-0">
+            <Tabs defaultValue={hasAi ? "ai" : "details"} className="flex flex-col flex-1 min-h-0">
               <div className="px-6 pt-2 shrink-0 border-b">
-                <TabsList variant="line" className="h-10 w-full grid grid-cols-5 mb-0">
-                  <TabsTrigger value="company" className="text-xs gap-1.5">
+                <TabsList variant="line" className={`h-10 w-full grid ${hasAi ? "grid-cols-3" : "grid-cols-2"} mb-0`}>
+                  {hasAi && (
+                    <TabsTrigger value="ai" className="text-xs gap-1.5">
+                      <MessageCircle className="h-3.5 w-3.5" />
+                      Übersicht
+                    </TabsTrigger>
+                  )}
+                  <TabsTrigger value="details" className="text-xs gap-1.5">
                     <Building2 className="h-3.5 w-3.5" />
-                    Firma
+                    Details
                   </TabsTrigger>
-                  <TabsTrigger value="contact_person" className="text-xs gap-1.5">
-                    <User className="h-3.5 w-3.5" />
-                    Person
-                  </TabsTrigger>
-                  <TabsTrigger value="contact" className="text-xs gap-1.5">
-                    <Phone className="h-3.5 w-3.5" />
-                    Kontakt
-                  </TabsTrigger>
-                  <TabsTrigger value="address" className="text-xs gap-1.5">
-                    <MapPin className="h-3.5 w-3.5" />
-                    Adresse
-                  </TabsTrigger>
-                  <TabsTrigger value="social" className="text-xs gap-1.5">
-                    <Share2 className="h-3.5 w-3.5" />
-                    Social
+                  <TabsTrigger value="activity" className="text-xs gap-1.5">
+                    <Clock className="h-3.5 w-3.5" />
+                    Aktivität
                   </TabsTrigger>
                 </TabsList>
               </div>
 
               <ScrollArea className="flex-1">
 
-                {/* Tab: Firma */}
-                <TabsContent value="company" className="mt-0 px-6 py-5 space-y-4 data-[state=inactive]:hidden">
+                {/* Tab: KI-Recherche (nur wenn Daten vom AI Researcher vorhanden) */}
+                {hasAi && ai && (
+                  <TabsContent value="ai" className="mt-0 px-6 py-5 space-y-4 data-[state=inactive]:hidden">
+                    {ai.score != null && (
+                      <div className="flex items-center gap-3 rounded-lg border bg-muted/40 px-4 py-3">
+                        <div className="text-2xl font-semibold tabular-nums leading-none">
+                          {ai.score}<span className="text-sm font-normal text-muted-foreground">/100</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Fit-Score · {ai.score >= 80 ? "Hohes Potenzial" : ai.score >= 60 ? "Solider Lead" : "Niedrige Priorität"}
+                        </div>
+                      </div>
+                    )}
+                    {ai.summary && (
+                      <div className="space-y-1.5">
+                        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Zusammenfassung</div>
+                        <p className="text-sm leading-relaxed text-foreground">{ai.summary}</p>
+                      </div>
+                    )}
+                    {(ai.revenue || ai.employees || ai.founded_year) && (
+                      <div className="grid grid-cols-3 gap-2">
+                        {ai.revenue && (
+                          <div className="rounded-lg border bg-muted/40 px-3 py-2">
+                            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Umsatz</div>
+                            <div className="text-sm font-medium">{ai.revenue}</div>
+                          </div>
+                        )}
+                        {ai.employees && (
+                          <div className="rounded-lg border bg-muted/40 px-3 py-2">
+                            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Mitarbeiter</div>
+                            <div className="text-sm font-medium">{ai.employees}</div>
+                          </div>
+                        )}
+                        {ai.founded_year && (
+                          <div className="rounded-lg border bg-muted/40 px-3 py-2">
+                            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Gegründet</div>
+                            <div className="text-sm font-medium">{ai.founded_year}</div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {ai.pain_points && (
+                      <div className="space-y-1.5">
+                        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Mögliche Pain Points</div>
+                        <p className="text-sm leading-relaxed text-foreground">{ai.pain_points}</p>
+                      </div>
+                    )}
+                    {ai.our_solution && (
+                      <div className="space-y-1.5 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
+                        <div className="text-xs font-medium uppercase tracking-wide text-primary">Unser Ansatz</div>
+                        <p className="text-sm leading-relaxed text-foreground">{ai.our_solution}</p>
+                      </div>
+                    )}
+                    {ai.sources && ai.sources.length > 0 && (
+                      <div className="space-y-1.5">
+                        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Quellen ({ai.sources.length})</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {ai.sources.map((s, i) => (
+                            s.url ? (
+                              <a key={i} href={s.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs hover:border-primary hover:text-primary">
+                                {s.title}<ExternalLink className="h-3 w-3" />
+                              </a>
+                            ) : (
+                              <span key={i} className="inline-flex items-center rounded-md border px-2 py-1 text-xs text-muted-foreground">{s.title}</span>
+                            )
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <a href="/dashboard/ai-researcher" className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline">
+                      <MessageCircle className="h-3.5 w-3.5" /> Im AI Researcher öffnen
+                    </a>
+                  </TabsContent>
+                )}
+
+                {/* Details – Firma */}
+                <TabsContent value="details" className="mt-0 px-6 pt-5 pb-2 space-y-4 data-[state=inactive]:hidden">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Firma</div>
                   <FormField
                     control={form.control}
                     name="company"
@@ -574,8 +653,9 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved, mode = "edit"
                   />
                 </TabsContent>
 
-                {/* Tab: Ansprechpartner */}
-                <TabsContent value="contact_person" className="mt-0 px-6 py-5 space-y-4 data-[state=inactive]:hidden">
+                {/* Details – Ansprechpartner */}
+                <TabsContent value="details" className="mt-0 px-6 pt-4 pb-2 space-y-4 data-[state=inactive]:hidden border-t border-border/60">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Ansprechpartner</div>
                   <div className="grid grid-cols-2 gap-3">
                     <FormField
                       control={form.control}
@@ -662,8 +742,9 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved, mode = "edit"
                   />
                 </TabsContent>
 
-                {/* Tab: Kontakt */}
-                <TabsContent value="contact" className="mt-0 px-6 py-5 space-y-4 data-[state=inactive]:hidden">
+                {/* Details – Kontakt */}
+                <TabsContent value="details" className="mt-0 px-6 pt-4 pb-2 space-y-4 data-[state=inactive]:hidden border-t border-border/60">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Kontakt</div>
                   <div className="grid grid-cols-2 gap-3">
                     <FormField
                       control={form.control}
@@ -724,8 +805,9 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved, mode = "edit"
                   />
                 </TabsContent>
 
-                {/* Tab: Adresse */}
-                <TabsContent value="address" className="mt-0 px-6 py-5 space-y-4 data-[state=inactive]:hidden">
+                {/* Details – Adresse */}
+                <TabsContent value="details" className="mt-0 px-6 pt-4 pb-2 space-y-4 data-[state=inactive]:hidden border-t border-border/60">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Adresse</div>
                   <FormField
                     control={form.control}
                     name="street"
@@ -793,8 +875,9 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved, mode = "edit"
                   </div>
                 </TabsContent>
 
-                {/* Tab: Social Media */}
-                <TabsContent value="social" className="mt-0 px-6 py-5 space-y-3 data-[state=inactive]:hidden">
+                {/* Details – Social */}
+                <TabsContent value="details" className="mt-0 px-6 pt-4 pb-5 space-y-3 data-[state=inactive]:hidden border-t border-border/60">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Social</div>
                   <p className="text-xs text-muted-foreground mb-1">
                     Social-Media-Profile des Unternehmens
                   </p>
@@ -819,6 +902,42 @@ export function LeadEditSheet({ lead, open, onOpenChange, onSaved, mode = "edit"
                       )}
                     />
                   ))}
+                </TabsContent>
+
+                {/* Aktivität */}
+                <TabsContent value="activity" className="mt-0 px-6 py-5 space-y-4 data-[state=inactive]:hidden">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Status &amp; Verlauf</div>
+                  <div className="rounded-lg border bg-muted/40 divide-y divide-border/60 text-sm">
+                    <div className="flex items-center justify-between px-3 py-2">
+                      <span className="text-muted-foreground">Status</span>
+                      {currentStatus && (
+                        <span className={cn("badge-status", STATUS_BADGE_CLASS[currentStatus.value])}>
+                          <span className="dot" />
+                          {currentStatus.label}
+                        </span>
+                      )}
+                    </div>
+                    {lead?.created_at && (
+                      <div className="flex items-center justify-between px-3 py-2">
+                        <span className="text-muted-foreground">Erfasst</span>
+                        <span>{new Date(lead.created_at).toLocaleDateString("de-AT")}</span>
+                      </div>
+                    )}
+                    {lead?.updated_at && (
+                      <div className="flex items-center justify-between px-3 py-2">
+                        <span className="text-muted-foreground">Aktualisiert</span>
+                        <span>{new Date(lead.updated_at).toLocaleDateString("de-AT")}</span>
+                      </div>
+                    )}
+                  </div>
+                  {lead?.notes ? (
+                    <div className="space-y-1.5">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Recherche-Log / Notizen</div>
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap text-foreground">{lead.notes}</p>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Noch keine Aktivität erfasst.</p>
+                  )}
                 </TabsContent>
 
               </ScrollArea>

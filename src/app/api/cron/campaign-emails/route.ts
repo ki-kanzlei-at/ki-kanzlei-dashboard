@@ -1,24 +1,42 @@
 /* ── Cron Job: GET /api/cron/campaign-emails ──
- * Versendet E-Mails für aktive Kampagnen über Multi-Account Rotation.
- * Wird alle 5 Minuten von Vercel Cron aufgerufen.
+ *
+ * Versendet die nächsten fälligen E-Mails pro Kampagne.
+ *
+ *  • Respektiert campaign.mailbox_id (festgelegte Mailbox) oder fällt
+ *    auf User-weite Account-Rotation zurück.
+ *  • Beachtet schedule.days/time_from/time_to/timezone pro Kampagne.
+ *  • Verarbeitet Sequenzen: nach erfolgreichem Send wird step_index
+ *    inkrementiert und next_send_at = now + delays[index-1] gesetzt.
+ *  • Auto-Stop on Reply, Bounce, Failure.
+ *  • Honoriert campaign.daily_limit (pro Tag).
+ *  • Mail-Generierung über src/lib/email/campaign-generator (Gemini
+ *    oder Template-Fallback).
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { getUserSettingsByUserId } from "@/lib/supabase/settings";
 import {
   getActiveAccountsForUser,
   pickNextAccount,
   incrementAccountSentCount,
   markAccountError,
+  type EmailAccount,
 } from "@/lib/supabase/email-accounts";
 import { sendEmailViaAccount } from "@/lib/email/sender";
+import { recordMessage } from "@/lib/inbox/store";
+import { generateCampaignMail } from "@/lib/email/campaign-generator";
+import { getUserSettingsByUserId } from "@/lib/supabase/settings";
+import { normalizeSendWindow, type SendWindow } from "@/lib/campaigns/send-window";
+import { consumeCredits } from "@/lib/credits";
+import type { Campaign } from "@/types/campaigns";
 
-export const maxDuration = 300; // 5 Minuten max (Vercel Pro)
+export const maxDuration = 300;
+
+const MAX_LEADS_PER_CAMPAIGN_PER_RUN = 10;
 
 export async function GET(request: NextRequest) {
   try {
-    // Cron-Auth prüfen
+    /* ── Cron-Auth ── */
     const authHeader = request.headers.get("authorization");
     if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -26,155 +44,313 @@ export async function GET(request: NextRequest) {
 
     const admin = getSupabaseAdmin();
 
-    // Alle aktiven Kampagnen laden
-    const { data: campaigns, error: campError } = await admin
+    /* ── Alle aktiven Kampagnen laden ── */
+    const { data: campaignsRaw, error: campErr } = await admin
       .from("campaigns")
       .select("*")
       .eq("status", "active");
 
-    if (campError) {
-      console.error("[Cron campaign-emails] Kampagnen laden:", campError);
-      return NextResponse.json({ error: campError.message }, { status: 500 });
+    if (campErr) {
+      console.error("[Cron campaign-emails] Kampagnen laden:", campErr);
+      return NextResponse.json({ error: campErr.message }, { status: 500 });
     }
 
-    if (!campaigns || campaigns.length === 0) {
+    const campaigns = (campaignsRaw ?? []) as Campaign[];
+    if (campaigns.length === 0) {
       return NextResponse.json({ message: "Keine aktiven Kampagnen", processed: 0 });
     }
 
+    const baseUrl =
+      process.env.NEXT_PUBLIC_APP_URL
+      || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+
     let totalSent = 0;
     let totalFailed = 0;
+    let totalSkipped = 0;
 
     for (const campaign of campaigns) {
       try {
-        // E-Mail-Konten für diesen User laden
-        const accounts = await getActiveAccountsForUser(campaign.user_id);
+        /* User-Settings früh laden — globale Versand-Defaults gelten als
+         * Fallback fürs Sendefenster, Gesamtlimit, Pause/Jitter, Tracking,
+         * Abmeldelink & Signatur. */
+        const settings = await getUserSettingsByUserId(campaign.user_id);
+        const cs = settings?.campaign_settings;
+        const signature = cs?.signature || "";
+        const globalWindow = normalizeSendWindow(cs?.send_window);
+        const brand = settings?.brand_settings;
+        const companyContext = {
+          companyName: brand?.company_name ?? null,
+          offering: brand?.offering ?? null,
+          valueProp: brand?.value_prop ?? null,
+          targetCustomer: brand?.target_customer ?? null,
+        };
+
+        /* Sendefenster prüfen (Kampagne hat Vorrang, sonst globales Fenster) */
+        if (!isInCampaignWindow(campaign, globalWindow)) {
+          totalSkipped++;
+          continue;
+        }
+
+        /* Tageslimit prüfen (pro Kampagne) */
+        if (await isOverDailyLimit(campaign)) {
+          totalSkipped++;
+          continue;
+        }
+
+        /* Tages-Gesamtlimit über alle Postfächer des Users (0 = aus) */
+        const totalDailyCap = cs?.total_daily_limit ?? 0;
+        let userSentToday = totalDailyCap > 0 ? await getUserSentTodayTotal(campaign.user_id) : 0;
+        if (totalDailyCap > 0 && userSentToday >= totalDailyCap) {
+          totalSkipped++;
+          continue;
+        }
+
+        /* Account-Quelle bestimmen */
+        const accounts = await loadAccountsForCampaign(campaign);
         if (accounts.length === 0) {
           await admin
             .from("campaigns")
-            .update({ error_message: "Keine aktiven E-Mail-Konten konfiguriert" })
+            .update({ error_message: "Keine aktive Mailbox konfiguriert" })
             .eq("id", campaign.id);
           continue;
         }
 
-        // User-Settings für Kampagnen-Einstellungen
-        const settings = await getUserSettingsByUserId(campaign.user_id);
-        const cs = settings?.campaign_settings;
+        /* Fällige Leads holen */
+        const sequenceLen = Array.isArray(campaign.sequence_steps)
+          ? campaign.sequence_steps.length
+          : 0;
+        if (sequenceLen === 0) {
+          // Schema: leere Sequenz → komplettieren, damit Cron nicht in Schleife läuft
+          await admin
+            .from("campaigns")
+            .update({ status: "completed", completed_at: new Date().toISOString() })
+            .eq("id", campaign.id);
+          continue;
+        }
 
-        // Sendefenster prüfen
-        const sendWindow = cs?.send_window || "business";
-        if (!isInSendWindow(sendWindow)) continue;
-
-        // Nächste pending Leads holen (max 10 pro Cron-Lauf pro Kampagne)
-        const { data: pendingLeads, error: leadsError } = await admin
+        const nowIso = new Date().toISOString();
+        const { data: dueLeads, error: leadsErr } = await admin
           .from("campaign_leads")
-          .select("*, lead:leads(company, email, ceo_name, website, phone)")
+          .select("*, lead:leads(id, company, email, ceo_name, ceo_first_name, ceo_last_name, ceo_title, ceo_gender, city, industry, website)")
           .eq("campaign_id", campaign.id)
-          .eq("status", "pending")
+          .not("status", "in", "(replied,bounced,failed,completed)")
+          .lt("step_index", sequenceLen)
+          .or(`next_send_at.is.null,next_send_at.lte.${nowIso}`)
           .order("created_at", { ascending: true })
-          .limit(10);
+          .limit(MAX_LEADS_PER_CAMPAIGN_PER_RUN);
 
-        if (leadsError) {
-          console.error(`[Cron] Leads laden für Kampagne ${campaign.id}:`, leadsError);
+        if (leadsErr) {
+          console.error(`[Cron] Leads für ${campaign.id}:`, leadsErr);
           continue;
         }
 
-        if (!pendingLeads || pendingLeads.length === 0) {
-          // Alle Leads verarbeitet?
-          const { count: stillPending } = await admin
-            .from("campaign_leads")
-            .select("id", { count: "exact", head: true })
-            .eq("campaign_id", campaign.id)
-            .eq("status", "pending");
+        if (!dueLeads || dueLeads.length === 0) {
+          await maybeCompleteCampaign(campaign.id);
+          continue;
+        }
 
-          if ((stillPending ?? 0) === 0) {
-            await admin
-              .from("campaigns")
-              .update({ status: "completed", completed_at: new Date().toISOString() })
-              .eq("id", campaign.id);
+        /* Tracking: Kampagne hat Vorrang, sonst globaler Default (Fallback true) */
+        const trackOpens = campaign.tracking?.opens ?? cs?.track_opens ?? true;
+        const trackClicks = campaign.tracking?.clicks ?? cs?.track_clicks ?? true;
+        const unsubLink = cs?.unsub_link ?? true;
+        const jitterPct = Math.max(0, Math.min(50, cs?.send_jitter ?? 20)) / 100;
+
+        for (const cl of dueLeads) {
+          /* Tages-Gesamtlimit auch innerhalb des Laufs respektieren */
+          if (totalDailyCap > 0 && userSentToday >= totalDailyCap) {
+            totalSkipped++;
+            break;
           }
-          continue;
-        }
-
-        const delayMs = Math.min(((cs?.delay_minutes ?? 1) * 60 * 1000) / 10, 30000);
-        const trackOpens = cs?.track_opens !== false;
-        const signature = cs?.signature || "";
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL
-          || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
-
-        for (let i = 0; i < pendingLeads.length; i++) {
-          const cl = pendingLeads[i];
           const lead = cl.lead;
-
           if (!lead?.email) {
             await admin
               .from("campaign_leads")
-              .update({ status: "failed", error_message: "Keine E-Mail-Adresse" })
+              .update({ status: "failed", error_message: "Keine E-Mail-Adresse", next_send_at: null })
               .eq("id", cl.id);
-            await incrementCampaignCounter(admin, campaign.id, "failed_count");
+            await incrementCampaignCounter(campaign.id, "failed_count");
             totalFailed++;
             continue;
           }
 
-          // Nächstes verfügbares Konto per Rotation wählen
           const account = pickNextAccount(accounts);
           if (!account) {
             // Alle Konten am Tageslimit → nächsten Cron-Lauf abwarten
             break;
           }
 
-          try {
-            const subject = generateSubject(campaign.name, lead);
-            const htmlBody = generateHtmlBody(
-              lead,
-              settings,
-              signature,
-              trackOpens ? `${baseUrl}/api/track/open/${cl.tracking_token}` : null,
-            );
+          const stepIndex = (cl.step_index as number) ?? 0;
+          const step = campaign.sequence_steps[stepIndex];
+          if (!step) {
+            await admin
+              .from("campaign_leads")
+              .update({ status: "completed", next_send_at: null })
+              .eq("id", cl.id);
+            continue;
+          }
 
-            const replyTo = campaign.reply_to || account.reply_to || cs?.reply_to;
+          try {
+            /* ── Credits-Check: kostet 1 mail_generate Credit ──
+             * Bei insufficient_credits → Lead skip, Fehler in error_message dokumentieren,
+             * Campaign NICHT pausieren (anderer Lead könnte trotzdem klappen mit Top-Up).
+             */
+            const creditCheck = await consumeCredits(
+              campaign.user_id,
+              "mail_generate",
+              { ref: cl.id, metadata: { campaign_id: campaign.id, lead_id: cl.lead_id, step_index: stepIndex } },
+            );
+            if (!creditCheck.ok) {
+              await admin
+                .from("campaign_leads")
+                .update({
+                  error_message: "Nicht genug Credits — Top-Up im Dashboard kaufen",
+                  next_send_at:  new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(), // 6h später retry
+                })
+                .eq("id", cl.id);
+              await admin
+                .from("campaigns")
+                .update({ error_message: "Credits aufgebraucht — Top-Up nötig" })
+                .eq("id", campaign.id);
+              totalSkipped++;
+              continue;
+            }
+
+            const trackingPixelUrl = trackOpens
+              ? `${baseUrl}/api/track/open/${cl.tracking_token}`
+              : null;
+
+            // Abmeldelink (DSGVO): mailto an die Antwortadresse — Antwort landet
+            // in der Inbox & stoppt die Sequenz, kein Extra-Endpoint nötig.
+            const unsubscribeEmail = unsubLink
+              ? (campaign.reply_to || account.reply_to || account.sender_email)
+              : null;
+
+            const mail = await generateCampaignMail({
+              campaign,
+              step,
+              stepIndex,
+              lead: {
+                id:              lead.id,
+                company:         lead.company,
+                email:           lead.email,
+                ceo_name:        lead.ceo_name,
+                ceo_first_name:  lead.ceo_first_name,
+                ceo_last_name:   lead.ceo_last_name,
+                ceo_title:       lead.ceo_title,
+                ceo_gender:      lead.ceo_gender,
+                city:            lead.city,
+                industry:        lead.industry,
+                website:         lead.website,
+              },
+              senderName: campaign.sender_name || account.sender_name || account.sender_email,
+              signature,
+              trackingPixelUrl,
+              unsubscribeEmail,
+              companyContext,
+            });
+
+            const htmlWithClickTracking = trackClicks
+              ? rewriteLinksForClickTracking(mail.htmlBody, baseUrl, cl.tracking_token)
+              : mail.htmlBody;
+
+            const replyTo = campaign.reply_to || account.reply_to || undefined;
 
             await sendEmailViaAccount(account, {
               to: lead.email,
-              subject,
-              htmlBody,
-              replyTo,
+              subject: mail.subject,
+              htmlBody: htmlWithClickTracking,
+              replyTo: replyTo ?? undefined,
             });
 
-            // Erfolg markieren
+            /* Sequenz fortschreiben */
+            const newStepIndex = stepIndex + 1;
+            const moreSteps = newStepIndex < sequenceLen;
+            const delayDays = moreSteps
+              ? (campaign.sequence_delays?.[stepIndex]?.value ?? 3)
+              : 0;
+            // Follow-up-Zeitpunkt zufällig streuen (±jitter), damit das Muster
+            // nicht exakt-maschinell wirkt.
+            const followupJitter = 1 + (Math.random() * 2 - 1) * jitterPct;
+            const nextSendAt = moreSteps
+              ? new Date(Date.now() + delayDays * 86_400_000 * followupJitter).toISOString()
+              : null;
+
+            const isFirstSend = !cl.sent_at;
             await admin
               .from("campaign_leads")
               .update({
-                status: "sent",
-                sent_at: new Date().toISOString(),
-                email_subject: subject,
+                status: moreSteps ? "sent" : "completed",
+                sent_at: isFirstSend ? new Date().toISOString() : cl.sent_at,
+                last_sent_at: new Date().toISOString(),
+                next_send_at: nextSendAt,
+                step_index: newStepIndex,
+                email_subject: mail.subject,
+                email_text: mail.plainBody.slice(0, 8000),
                 sender_email: account.sender_email,
+                error_message: null,
               })
               .eq("id", cl.id);
 
+            // Ausgehende Mail in die Inbox spiegeln (zweiseitiger Thread)
+            try {
+              await recordMessage(admin, {
+                userId: campaign.user_id,
+                channel: "email",
+                direction: "out",
+                contactEmail: lead.email,
+                contactName: lead.ceo_name || lead.company || lead.email,
+                contactCompany: lead.company || null,
+                leadId: lead.id,
+                campaignId: campaign.id,
+                campaignName: campaign.name || null,
+                subject: mail.subject,
+                body: mail.plainBody,
+                fromName: account.sender_name || account.sender_email,
+                senderEmail: account.sender_email,
+                externalId: `cl-out:${cl.id}:${stepIndex}`,
+              });
+            } catch (e) {
+              console.error("[Cron] Inbox-Spiegelung (out) fehlgeschlagen:", e);
+            }
+
             await incrementAccountSentCount(account.id);
-            account.sent_today++; // In-memory aktualisieren für Rotation
-            await incrementCampaignCounter(admin, campaign.id, "sent_count");
+            account.sent_today++;
+            userSentToday++;
+            await incrementCampaignCounter(campaign.id, "sent_count");
             totalSent++;
           } catch (err) {
             const errorMsg = err instanceof Error ? err.message : "Unbekannter Fehler";
-            console.error(`[Cron] E-Mail senden an ${lead.email} via ${account.sender_email}:`, errorMsg);
+            console.error(`[Cron] Send-Fehler an ${lead.email} via ${account.sender_email}:`, errorMsg);
 
             await markAccountError(account.id, errorMsg);
-
             await admin
               .from("campaign_leads")
-              .update({ status: "failed", error_message: errorMsg.slice(0, 500) })
+              .update({
+                status: "failed",
+                error_message: errorMsg.slice(0, 500),
+                next_send_at: null,
+              })
               .eq("id", cl.id);
-
-            await incrementCampaignCounter(admin, campaign.id, "failed_count");
+            await incrementCampaignCounter(campaign.id, "failed_count");
             totalFailed++;
           }
 
-          // Delay zwischen E-Mails
-          if (i < pendingLeads.length - 1 && delayMs > 0) {
-            await new Promise((r) => setTimeout(r, delayMs));
+          /* Inter-Send Gap (Anti-Burst). Basis: Kampagnen-gap_seconds, sonst die
+           * globale "Pause zwischen E-Mails" (delay_minutes). Mit ±Jitter.
+           * Im Serverless-Lauf gedeckelt (0,1× / max 30 s), echtes Pacing macht
+           * die Cron-Frequenz. */
+          const baseGapSec = campaign.schedule?.gap_seconds
+            ?? (cs?.delay_minutes ? cs.delay_minutes * 60 : 180);
+          const gapJitter = 1 + (Math.random() * 2 - 1) * jitterPct;
+          const gapMs = Math.min(
+            Math.max(0, baseGapSec * gapJitter) * 1000 * 0.1,
+            30_000,
+          );
+          if (gapMs > 0) {
+            await new Promise((r) => setTimeout(r, gapMs));
           }
         }
+
+        await maybeCompleteCampaign(campaign.id);
       } catch (err) {
         console.error(`[Cron] Kampagne ${campaign.id} Fehler:`, err);
       }
@@ -185,95 +361,161 @@ export async function GET(request: NextRequest) {
       processed: totalSent + totalFailed,
       sent: totalSent,
       failed: totalFailed,
+      skipped: totalSkipped,
     });
-  } catch (error) {
-    console.error("[Cron campaign-emails]", error);
+  } catch (err) {
+    console.error("[Cron campaign-emails]", err);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
 
-/* ── Hilfsfunktionen ── */
+/* ───────────────────────── Helpers ──────────────────────────── */
 
-function isInSendWindow(window: string): boolean {
-  const now = new Date();
-  const hour = now.getUTCHours() + 1; // CET approximation
-  const day = now.getUTCDay();
+/**
+ * Sendefenster-Check: prüft schedule.days[0..6] (Mo..So) und time_from/to
+ * in der gewählten Zeitzone. Hat die Kampagne kein eigenes Fenster, gilt das
+ * globale Versandfenster (fallback) aus den User-Settings.
+ */
+function isInCampaignWindow(campaign: Campaign, fallback?: SendWindow): boolean {
+  const schedule = (campaign.schedule && Array.isArray(campaign.schedule.days))
+    ? campaign.schedule
+    : fallback;
+  if (!schedule || !Array.isArray(schedule.days)) return true; // Standard: immer
 
-  switch (window) {
-    case "business":
-      return day >= 1 && day <= 5 && hour >= 8 && hour < 18;
-    case "extended":
-      return day >= 1 && day <= 5 && hour >= 7 && hour < 21;
-    case "always":
-      return true;
-    default:
-      return true;
+  try {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: schedule.timezone || "Europe/Vienna",
+      hour:   "2-digit",
+      minute: "2-digit",
+      weekday: "short",
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(new Date());
+    const weekday = parts.find((p) => p.type === "weekday")?.value ?? "Mon";
+    const hour    = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
+    const minute  = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
+
+    const dayIdx = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(weekday);
+    if (dayIdx < 0) return true;
+    if (!schedule.days[dayIdx]) return false;
+
+    const minutes = hour * 60 + minute;
+    const [fH, fM] = (schedule.time_from || "09:00").split(":").map(Number);
+    const [tH, tM] = (schedule.time_to   || "17:00").split(":").map(Number);
+    const fromMin = fH * 60 + (fM || 0);
+    const toMin   = tH * 60 + (tM || 0);
+    return minutes >= fromMin && minutes < toMin;
+  } catch {
+    return true;
   }
 }
 
-function generateSubject(
-  campaignName: string,
-  lead: { company?: string; ceo_name?: string },
-): string {
-  let subject = campaignName;
-  if (lead.company) subject = subject.replace(/\{company\}/gi, lead.company);
-  if (lead.ceo_name) subject = subject.replace(/\{name\}/gi, lead.ceo_name);
-  return subject;
+async function isOverDailyLimit(campaign: Campaign): Promise<boolean> {
+  if (!campaign.daily_limit || campaign.daily_limit <= 0) return false;
+  const admin = getSupabaseAdmin();
+  const startOfDayIso = new Date(
+    new Date().setHours(0, 0, 0, 0),
+  ).toISOString();
+  const { count } = await admin
+    .from("campaign_leads")
+    .select("id", { count: "exact", head: true })
+    .eq("campaign_id", campaign.id)
+    .gte("last_sent_at", startOfDayIso);
+  return (count ?? 0) >= campaign.daily_limit;
 }
 
-function generateHtmlBody(
-  lead: { company?: string; ceo_name?: string; email?: string; website?: string },
-  settings: { linkedin_sender_profile?: { name?: string; position?: string; company?: string } | null } | null,
-  signature: string,
-  trackingPixelUrl: string | null,
-): string {
-  const senderProfile = settings?.linkedin_sender_profile;
-  const name = lead.ceo_name || "Geschäftsführer/in";
-  const company = lead.company || "";
+/** Summe der heute bereits versendeten Mails über ALLE aktiven Postfächer des Users. */
+async function getUserSentTodayTotal(userId: string): Promise<number> {
+  const admin = getSupabaseAdmin();
+  const today = new Date().toISOString().slice(0, 10);
+  const { data } = await admin
+    .from("email_accounts")
+    .select("sent_today, sent_today_date")
+    .eq("user_id", userId)
+    .eq("is_active", true);
+  if (!data) return 0;
+  return data.reduce(
+    (sum, a) => sum + (a.sent_today_date === today ? (a.sent_today ?? 0) : 0),
+    0,
+  );
+}
 
-  let sig = signature;
-  if (sig) {
-    sig = sig.replace(/\{name\}/g, senderProfile?.name || "");
-    sig = sig.replace(/\{position\}/g, senderProfile?.position || "");
-    sig = sig.replace(/\{company\}/g, senderProfile?.company || "");
-    sig = sig.split("\n").map((l) => `<p style="margin:0">${l}</p>`).join("");
-    sig = `<br/><div style="margin-top:16px;padding-top:16px;border-top:1px solid #e5e7eb">${sig}</div>`;
+async function loadAccountsForCampaign(campaign: Campaign): Promise<EmailAccount[]> {
+  const admin = getSupabaseAdmin();
+  const today = new Date().toISOString().slice(0, 10);
+
+  if (campaign.mailbox_id) {
+    const { data } = await admin
+      .from("email_accounts")
+      .select("*")
+      .eq("id", campaign.mailbox_id)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (!data) return [];
+    const acc = data as EmailAccount;
+    if (acc.sent_today_date !== today) {
+      await admin
+        .from("email_accounts")
+        .update({ sent_today: 0, sent_today_date: today })
+        .eq("id", acc.id);
+      acc.sent_today = 0;
+      acc.sent_today_date = today;
+    }
+    return [acc];
   }
 
-  const trackingPixel = trackingPixelUrl
-    ? `<img src="${trackingPixelUrl}" width="1" height="1" style="display:none" alt="" />`
-    : "";
+  return getActiveAccountsForUser(campaign.user_id);
+}
 
-  return `
-<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#1a1a1a">
-  <p>Sehr geehrte/r ${name},</p>
-  <p>ich kontaktiere Sie im Zusammenhang mit ${company}.</p>
-  ${sig}
-</div>
-${trackingPixel}
-`.trim();
+async function maybeCompleteCampaign(campaignId: string): Promise<void> {
+  const admin = getSupabaseAdmin();
+  const { count } = await admin
+    .from("campaign_leads")
+    .select("id", { count: "exact", head: true })
+    .eq("campaign_id", campaignId)
+    .not("status", "in", "(completed,failed,bounced,replied)");
+  if ((count ?? 0) === 0) {
+    await admin
+      .from("campaigns")
+      .update({ status: "completed", completed_at: new Date().toISOString() })
+      .eq("id", campaignId);
+  }
 }
 
 async function incrementCampaignCounter(
-  admin: ReturnType<typeof getSupabaseAdmin>,
   campaignId: string,
   field: string,
 ): Promise<void> {
+  const admin = getSupabaseAdmin();
   const rpcName = `increment_${field}`;
   const { error } = await admin.rpc(rpcName, { p_campaign_id: campaignId });
-
   if (error) {
+    // Fallback ohne RPC
     const { data } = await admin
       .from("campaigns")
       .select(field)
       .eq("id", campaignId)
       .single();
-
-    if (data) {
-      await admin
-        .from("campaigns")
-        .update({ [field]: ((data as unknown as Record<string, number>)[field] ?? 0) + 1 })
-        .eq("id", campaignId);
-    }
+    if (!data) return;
+    await admin
+      .from("campaigns")
+      .update({ [field]: ((data as unknown as Record<string, number>)[field] ?? 0) + 1 })
+      .eq("id", campaignId);
   }
+}
+
+/**
+ * Ersetzt http(s)-Links im HTML durch /api/track/click/<token>?u=…
+ * Der Endpoint zählt den Klick und leitet auf die Original-URL weiter.
+ * mailto:- und bereits getrackte Links (…/api/track/…) bleiben unangetastet.
+ */
+function rewriteLinksForClickTracking(
+  html: string,
+  baseUrl: string,
+  token: string,
+): string {
+  return html.replace(/href="(https?:\/\/[^"]+)"/gi, (match, url: string) => {
+    if (url.startsWith(`${baseUrl}/api/track/`)) return match; // nicht doppelt tracken
+    return `href="${baseUrl}/api/track/click/${token}?u=${encodeURIComponent(url)}"`;
+  });
 }

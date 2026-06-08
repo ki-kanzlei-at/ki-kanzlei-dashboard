@@ -494,7 +494,7 @@ export default function LinkedInPage() {
       <div className="px-4 lg:px-6 space-y-4">
         <div className="flex items-start justify-between gap-6">
           <div className="space-y-1">
-            <h1 className="text-[24px] font-medium tracking-tight leading-tight">LinkedIn</h1>
+            <h1 className="text-[24px] font-semibold tracking-tight leading-tight">LinkedIn</h1>
             <p className="text-[13.5px] text-muted-foreground max-w-xl">
               Verbindungen, Nachrichten und Outreach für dein LinkedIn-Profil.
             </p>

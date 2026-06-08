@@ -58,7 +58,7 @@ import { cn } from "@/lib/utils";
 import type { SearchFormValues, SearchSource } from "@/components/leads/LeadSearchForm";
 
 import type { Lead, LeadStatus, SearchJob } from "@/types/leads";
-import { INDUSTRY_OPTIONS, COMPANY_TYPE_OPTIONS } from "@/types/leads";
+import { INDUSTRY_OPTIONS } from "@/types/leads";
 import { AT_BUNDESLAENDER } from "@/lib/bundesland";
 import { createClient as createBrowserClient } from "@/lib/supabase/client";
 
@@ -282,9 +282,27 @@ export default function LeadScrapingPage() {
       setPageSizeOverride(p.pageSize);
     }
     if (typeof window !== "undefined") {
-      const tabParam = new URLSearchParams(window.location.search).get("tab");
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab");
       if (tabParam === "search" || tabParam === "leads") {
         setActiveTab(tabParam);
+      }
+      // Deep-Link aus dem AI Researcher: ?lead=<id> → Lead-Sidebar direkt öffnen
+      const leadParam = params.get("lead");
+      if (leadParam) {
+        (async () => {
+          try {
+            const res = await fetch(`/api/leads/${leadParam}`);
+            if (res.ok) {
+              const j = await res.json();
+              if (j.data) { setEditLead(j.data); setEditMode("edit"); setEditOpen(true); }
+            }
+          } catch { /* ignore */ }
+        })();
+        // Param entfernen, damit die Sidebar beim Schließen nicht erneut aufgeht
+        params.delete("lead");
+        const qs = params.toString();
+        window.history.replaceState(null, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
       }
     }
     setHydrated(true);
@@ -315,6 +333,7 @@ export default function LeadScrapingPage() {
 
   /* ── Dynamic Filter Options ── */
   const [industryOptions, setIndustryOptions] = useState<{ value: string; label: string }[]>([...INDUSTRY_OPTIONS]);
+  const [legalFormOptions, setLegalFormOptions] = useState<{ value: string; label: string }[]>([]);
   const [cityOptions, setCityOptions]     = useState<{ value: string; label: string }[]>([]);
   const [countryOptions, setCountryOptions] = useState<{ value: string; label: string }[]>([]);
 
@@ -413,6 +432,20 @@ export default function LeadScrapingPage() {
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterStatus, filterCountry, filterStates]);
+
+  /* ── Rechtsformen NUR aus den vorhandenen Daten (nach Land) laden ── */
+  useEffect(() => {
+    (async () => {
+      try {
+        const qs = filterCountry !== "all" ? `?country=${encodeURIComponent(filterCountry)}` : "";
+        const res = await fetch(`/api/leads/legal-forms${qs}`);
+        if (!res.ok) return;
+        const json = await res.json();
+        setLegalFormOptions((json.data as string[]).map((v) => ({ value: v, label: v })));
+      } catch { /* silent */ }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterCountry]);
 
   /* ── Data fetching ── */
   const fetchLeads = useCallback(async (page = 1) => {
@@ -615,7 +648,7 @@ export default function LeadScrapingPage() {
           const age = now - new Date(job.created_at).getTime();
           if (age > STALE_JOB_TIMEOUT_MS && !timedOutJobsRef.current.has(job.id)) {
             timedOutJobsRef.current.add(job.id);
-            toast.error(`Suche "${job.query}" abgebrochen — Zeitüberschreitung`);
+            toast.error(`Suche "${job.query}" abgebrochen (Zeitüberschreitung)`);
             fetch(`/api/leads/search/${job.id}`, {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
@@ -970,7 +1003,7 @@ export default function LeadScrapingPage() {
       <div className="px-4 lg:px-6 space-y-4">
         <div className="flex items-start justify-between gap-6">
           <div className="space-y-1">
-            <h1 className="text-[24px] font-medium tracking-tight leading-tight">Leads</h1>
+            <h1 className="text-[24px] font-semibold tracking-tight leading-tight">Leads</h1>
             <p className="text-[13.5px] text-muted-foreground max-w-xl">
               Finde, qualifiziere und kontaktiere potenzielle Leads in Österreich, Deutschland und der Schweiz.
             </p>
@@ -1142,14 +1175,14 @@ export default function LeadScrapingPage() {
 
                 <FilterTriggerPopover
                   label="Rechtsform"
-                  value={filterLegalForms.length > 0 ? (filterLegalForms.length === 1 ? (COMPANY_TYPE_OPTIONS.find((o) => o.value === filterLegalForms[0])?.label ?? filterLegalForms[0]) : `${filterLegalForms.length} ausgewählt`) : null}
+                  value={filterLegalForms.length > 0 ? (filterLegalForms.length === 1 ? filterLegalForms[0] : `${filterLegalForms.length} ausgewählt`) : null}
                   onClear={() => setFilterLegalForms([])}
                   multi
                   selectValue={filterLegalForms}
                   onSelectChange={setFilterLegalForms}
-                  options={COMPANY_TYPE_OPTIONS.filter((o) => o.value !== "all").map((o) => ({ value: o.value, label: o.label }))}
+                  options={legalFormOptions}
                   searchPlaceholder="Rechtsform suchen…"
-                  emptyText="Keine Rechtsform gefunden"
+                  emptyText="Keine Rechtsform in den Daten"
                 />
 
                 <FilterTriggerPopover
