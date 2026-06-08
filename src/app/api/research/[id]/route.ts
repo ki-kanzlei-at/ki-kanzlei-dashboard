@@ -36,6 +36,22 @@ export async function DELETE(
     if (!user) return NextResponse.json({ error: "Nicht authentifiziert" }, { status: 401 });
 
     const { id } = await params;
+    // Sync: verknüpfte Leads entkoppeln, damit das Sheet keinen toten „Im AI Researcher
+    // öffnen"-Link mehr zeigt (Session existiert nicht mehr).
+    try {
+      const { data: linked } = await supabase
+        .from("leads").select("id, raw_data")
+        .eq("raw_data->ai_research->>session_id", id);
+      for (const l of linked ?? []) {
+        const raw = (l.raw_data ?? {}) as Record<string, unknown>;
+        const air = (raw.ai_research ?? {}) as Record<string, unknown>;
+        await supabase.from("leads").update({
+          raw_data: { ...raw, ai_research: { ...air, session_id: null } },
+        }).eq("id", l.id);
+      }
+    } catch (e) {
+      console.error("[research DELETE] Lead-Sync fehlgeschlagen", e);
+    }
     // RLS stellt sicher, dass nur eigene Recherchen gelöscht werden können.
     await deleteSession(id);
     return NextResponse.json({ data: { ok: true } });

@@ -356,8 +356,11 @@ ${known}
 ${scraped ? `WEBSITE-INHALT (Auszug):\n${scraped.substring(0, 5000)}\n` : ""}
 AUFGABE — Überblick in DIESEM Format (Markdown), 120–200 Wörter:
 - 1 Einleitungssatz, was die Kanzlei/Firma macht.
-- Danach kurze Abschnitte mit "## Überschrift" und "- " Stichpunkten zu: Spezialisierung/Schwerpunkte; harte Kennzahlen (Mitarbeiterzahl bzw. Größenklasse, Umsatz falls öffentlich, Gründungsjahr, Rechtsform, UID/Firmenbuchnummer, Anzahl Standorte); Digitalisierungsgrad; und konkrete Anknüpfungspunkte für ${name}.
-- Abschnitt "## Schlüsselpersonen & Kontakt": die wichtigsten Entscheider:innen (Geschäftsführung sowie, falls auffindbar, relevante Funktionen wie Einkauf, IT, Finanzen, Marketing) je mit Name und Funktion. Ein LinkedIn-Profil NUR nennen, wenn du eine echte öffentliche Profil-URL hast — sonst die LinkedIn-Zeile komplett WEGLASSEN (niemals "nicht gefunden", "nicht öffentlich" o.ä. schreiben). Als Kontakt nur real belegte Adressen/Telefonnummern. Rate KEIN E-Mail-Schema und konstruiere keine persönlichen E-Mail-Adressen (kein "vorname.nachname@…"). Nenne nur real belegte Personen.
+- Danach kurze Abschnitte mit "## Überschrift" und "- " Stichpunkten zu: Spezialisierung/Schwerpunkte; harte Kennzahlen; Digitalisierungsgrad; und konkrete Anknüpfungspunkte für ${name}.
+- Bei den Kennzahlen gib IMMER eine Mitarbeiterzahl ODER Größenklasse an: nutze die LinkedIn-Mitarbeiterspanne (z. B. "11–50 Mitarbeiter"), die Team-/Über-uns-Seite (Personen zählen) oder die Zahl offener Stellen. Wenn keine exakte Zahl belegt ist, gib eine begründete Schätzung wie "ca. 10–50 (geschätzt aus LinkedIn/Team)" — nur weglassen, wenn es gar keinen Anhaltspunkt gibt.
+- Umsatz: offizielle Zahl mit Jahr, falls belegt. Sonst eine grobe, klar als "geschätzt" markierte Spanne, abgeleitet aus Mitarbeiterzahl und Branche (z. B. "geschätzt 2–5 Mio € (aus Größe/Branche)"). Bei nicht publizitätspflichtigen Firmen (v. a. CH/kleine GmbH) ist eine begründete Schätzung erwünscht statt gar keiner Angabe.
+- Dazu Gründungsjahr, Rechtsform, UID/Firmenbuchnummer, Anzahl Standorte (wenn belegt).
+- Abschnitt "## Schlüsselpersonen & Kontakt": Nenne ZWINGEND mindestens die oberste Entscheider-Person mit VOLLEM Namen (CEO / Geschäftsführer:in / Inhaber:in / Gründer:in) — recherchiere dafür gezielt LinkedIn, das Impressum und die Über-uns-/Team-Seite. Dazu, falls auffindbar, weitere Entscheider:innen (Einkauf, IT, Finanzen, Marketing) je mit Name und Funktion. Nur wenn nach gründlicher Suche absolut keine Person namentlich belegt ist, schreibe das knapp. Ein LinkedIn-Profil NUR nennen, wenn du eine echte öffentliche Profil-URL hast — sonst die LinkedIn-Zeile komplett WEGLASSEN (niemals "nicht gefunden", "nicht öffentlich" o.ä. schreiben). Als Kontakt nur real belegte Adressen/Telefonnummern. Rate KEIN E-Mail-Schema und konstruiere keine persönlichen E-Mail-Adressen (kein "vorname.nachname@…"). Nenne nur real belegte Personen.
 - Nenne konkrete Kennzahlen (Umsatz, Mitarbeiterzahl, Gründungsjahr, Standorte, UID/FN) nur, wenn sie durch deine Quellen belegt sind — Quellenverweise werden automatisch ergänzt. Setze KEINE eigenen Klammer-Verweise wie [1] oder (Quelle). Aussagen ohne Beleg lässt du weg.
 - Hebe Schlüsselbegriffe mit **fett** hervor.
 - Erfinde nichts. Keine Vorrede wie "Hier ist…". Beginne direkt mit dem Einleitungssatz.`;
@@ -438,15 +441,15 @@ Gib NUR JSON zurück. Strukturierte Felder NUR ausfüllen, wenn im Überblick be
   "city": "<Stadt oder null>",
   "state": "<österr. Bundesland oder null>",
   "legal_form": "<GmbH|OG|KG|e.U.|AG|… oder null>",
-  "ceo_name": "<Geschäftsführer:in / Inhaber:in, Vor- und Nachname, oder null>",
+  "ceo_name": "<Vor- und Nachname der OBERSTEN Entscheider-Person aus dem Überblick (CEO/Geschäftsführung/Inhaber/Gründer); bei mehreren die ranghöchste bzw. erstgenannte; nur null, wenn im Überblick WIRKLICH keine Person mit Namen steht>",
   "ceo_title": "<akademischer Titel wie Mag./Dr. oder null>",
   "street": "<Straße + Hausnummer oder null>",
   "postal_code": "<PLZ oder null>",
-  "email": "<Kontakt-E-Mail oder null>",
+  "email": "<beste REAL belegte Kontakt-E-Mail; bevorzugt die persönliche Adresse der Geschäftsführung, falls im Impressum/Web belegt — niemals erfinden — sonst die beste Firmen-Adresse, oder null>",
   "phone": "<Telefonnummer oder null>",
   "summary": "<1–2 Sätze: was die Firma macht, prägnant, oder null>",
-  "employees": "<Mitarbeiterzahl bzw. Größenklasse, falls belegt, sonst null>",
-  "revenue": "<Umsatz mit Jahr, falls öffentlich belegt, sonst null>",
+  "employees": "<Mitarbeiterzahl oder Größenklasse — bevorzugt belegt (LinkedIn-Spanne / Team-Seite / Stellenanzeigen), sonst begründete Schätzung wie 'ca. 10-50 (geschätzt)'; nur null, wenn es GAR keinen Anhaltspunkt gibt>",
+  "revenue": "<Umsatz mit Jahr, falls öffentlich belegt; sonst eine grobe, mit 'geschätzt' markierte Spanne aus Mitarbeiterzahl/Branche (z. B. 'geschätzt 2-5 Mio €'); nur null, wenn nicht einmal die Größe bekannt ist>",
   "founded_year": "<Gründungsjahr oder null>",
   "pain_points": "<1–2 mögliche Pain Points der Firma, die zu unserem Angebot passen, oder null>",
   "our_solution": "<1 Satz: was ${name} dieser Firma konkret anbieten könnte, oder null>",

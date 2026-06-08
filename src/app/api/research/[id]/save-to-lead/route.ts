@@ -11,9 +11,18 @@ import {
   addMessage,
 } from "@/lib/supabase/research";
 import { insertLeads, updateLead, getLeadById, findExistingLead } from "@/lib/supabase/leads";
-import { blocksToPlainText } from "@/lib/research/format";
 import type { Lead, LeadInsert, LeadUpdate } from "@/types/leads";
 import type { ResearchSessionWithMessages, SavedCard, SavedCardItem } from "@/types/research";
+
+/** Mitarbeiter-Freitext ("ca. 57.000", "10-50 Mitarbeiter") → Integer für employee_count. */
+function parseEmployeeCount(s?: string | null): number | null {
+  if (!s) return null;
+  const m = s.replace(/[.,]/g, "").match(/(\d+)\s*(k|tsd|tausend)?/i);
+  if (!m) return null;
+  let n = parseInt(m[1], 10);
+  if (m[2]) n *= 1000;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 
 /** Strukturierte KI-Recherche-Daten, die am Lead gespeichert werden (für die Lead-Sidebar). */
 function buildAiResearch(session: ResearchSessionWithMessages, now: string) {
@@ -35,7 +44,6 @@ function buildAiResearch(session: ResearchSessionWithMessages, now: string) {
 function buildLeadInsert(
   session: ResearchSessionWithMessages,
   userId: string,
-  notes: string,
 ): LeadInsert {
   const lf = session.lead_fields ?? {};
   const ceoFull = [lf.ceo_title, lf.ceo_name].filter(Boolean).join(" ").trim() || null;
@@ -59,6 +67,9 @@ function buildLeadInsert(
     country: session.country || "AT",
     industry: session.industry,
     legal_form: lf.legal_form ?? null,
+    // Recherche-Kennzahlen fließen in echte Felder statt in eine Notiz
+    employee_count: parseEmployeeCount(lf.employees),
+    revenue: lf.revenue ?? null,
     ceo_name: ceoFull,
     ceo_title: lf.ceo_title ?? null,
     ceo_first_name: ceoFirst,
@@ -74,7 +85,7 @@ function buildLeadInsert(
     social_twitter: null,
     social_youtube: null,
     social_tiktok: null,
-    notes,
+    notes: null,
     status: "new",
     search_query: null,
     search_location: null,
@@ -88,17 +99,19 @@ function buildLeadInsert(
 
 /** Merge-Update für einen bereits existierenden Lead (Duplikat-Vermeidung):
  *  füllt nur leere Felder, hängt die Notiz an und aktualisiert die KI-Recherche. */
-function buildMergeUpdate(existing: Lead, session: ResearchSessionWithMessages, note: string): LeadUpdate {
+function buildMergeUpdate(existing: Lead, session: ResearchSessionWithMessages): LeadUpdate {
   const lf = session.lead_fields ?? {};
   const ceoFull = [lf.ceo_title, lf.ceo_name].filter(Boolean).join(" ").trim() || null;
   const prevRaw = (existing.raw_data ?? {}) as Record<string, unknown>;
   return {
-    notes: existing.notes ? `${existing.notes}\n\n${note}` : note,
     company_name: existing.company_name || session.company,
     phone: existing.phone || lf.phone || null,
     website: existing.website || session.website,
     industry: existing.industry || session.industry,
     legal_form: existing.legal_form || lf.legal_form || null,
+    // Kennzahlen in echte Felder (nur wenn noch leer)
+    employee_count: existing.employee_count ?? parseEmployeeCount(lf.employees),
+    revenue: existing.revenue || lf.revenue || null,
     ceo_name: existing.ceo_name || ceoFull,
     ceo_title: existing.ceo_title || lf.ceo_title || null,
     street: existing.street || lf.street || null,
@@ -108,33 +121,6 @@ function buildMergeUpdate(existing: Lead, session: ResearchSessionWithMessages, 
     social_instagram: existing.social_instagram || lf.social_instagram || null,
     raw_data: { ...prevRaw, ai_research: buildAiResearch(session, new Date().toISOString()) },
   };
-}
-
-/** Strukturierte, lesbare Lead-Notiz aus den Recherche-Feldern (statt einem Blob). */
-function buildLeadNotes(session: ResearchSessionWithMessages, overviewFallback: string): string {
-  const lf = session.lead_fields ?? {};
-  const date = new Date().toLocaleDateString("de-AT");
-  const parts: string[] = [`KI-Recherche (${date})`];
-
-  const summary = lf.summary || overviewFallback.split("\n").find((l) => l.trim().length > 40) || "";
-  if (summary) parts.push(`\nZusammenfassung:\n${summary}`);
-
-  const kennzahlen = [
-    lf.revenue ? `Umsatz: ${lf.revenue}` : "",
-    lf.employees ? `Mitarbeiter: ${lf.employees}` : "",
-    lf.founded_year ? `Gegründet: ${lf.founded_year}` : "",
-    lf.legal_form ? `Rechtsform: ${lf.legal_form}` : "",
-  ].filter(Boolean);
-  if (kennzahlen.length) parts.push(`\nKennzahlen:\n${kennzahlen.map((k) => `- ${k}`).join("\n")}`);
-
-  if (lf.pain_points) parts.push(`\nMögliche Pain Points:\n${lf.pain_points}`);
-  if (lf.our_solution) parts.push(`\nUnser Ansatz:\n${lf.our_solution}`);
-
-  const social = [lf.social_linkedin, lf.social_facebook, lf.social_instagram].filter(Boolean);
-  if (social.length) parts.push(`\nSocial:\n${social.map((s) => `- ${s}`).join("\n")}`);
-
-  if (session.sources.length) parts.push(`\nQuellen: ${session.sources.map((s) => s.title).join(", ")}`);
-  return parts.join("\n");
 }
 
 function buildCard(session: ResearchSessionWithMessages, leadId: string): SavedCard {
@@ -168,30 +154,26 @@ export async function POST(
       return NextResponse.json({ data: { leadId: session.saved_lead_id, alreadySaved: true } });
     }
 
-    // Strukturierte Notiz aus den Recherche-Feldern (Zusammenfassung, Kennzahlen,
-    // Pain Points, Ansatz, Social) — nicht der rohe Overview-Blob.
-    const firstAi = session.messages.find((m) => m.role === "ai");
-    const overview = blocksToPlainText(firstAi?.blocks);
-    const note = buildLeadNotes(session, overview);
-
+    // KI-Recherche fließt in die strukturierten Felder + raw_data.ai_research —
+    // KEIN Notiz-Blob mehr (Notizen bleiben für den User).
     let leadId: string;
     let merged = false;
     if (session.lead_id) {
       // Aus dem CRM gestartet → genau diesen Lead aktualisieren
       const existing = await getLeadById(session.lead_id);
       if (!existing) return NextResponse.json({ error: "Verknüpfter Lead nicht gefunden" }, { status: 404 });
-      await updateLead(existing.id, buildMergeUpdate(existing, session, note));
+      await updateLead(existing.id, buildMergeUpdate(existing, session));
       leadId = existing.id;
       merged = true;
     } else {
       // Duplikat-Check: existiert die Firma schon (Domain/Name)? → mergen statt doppeln
       const dup = await findExistingLead(session.company, session.website);
       if (dup) {
-        await updateLead(dup.id, buildMergeUpdate(dup, session, note));
+        await updateLead(dup.id, buildMergeUpdate(dup, session));
         leadId = dup.id;
         merged = true;
       } else {
-        const [created] = await insertLeads([buildLeadInsert(session, user.id, note)]);
+        const [created] = await insertLeads([buildLeadInsert(session, user.id)]);
         leadId = created.id;
       }
     }

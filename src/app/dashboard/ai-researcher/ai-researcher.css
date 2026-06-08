@@ -19,7 +19,7 @@
   color: var(--foreground);
   font-size: 13.5px;
 }
-.air-root .air-workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: 286px 1fr; }
+.air-root .air-workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: 304px 1fr; }
 
 /* ── Primitive: Buttons ── */
 .air-root .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 36px; padding: 0 14px; border-radius: 8px; font-size: 13px; font-weight: 500; border: 1px solid transparent; cursor: pointer; white-space: nowrap; font-family: inherit; transition: background .12s ease, border-color .12s ease, color .12s ease, opacity .12s ease; }
@@ -105,6 +105,11 @@
 .air-root .air-session-when { flex: 0 0 auto; font-size: 10.5px; color: var(--muted-foreground); white-space: nowrap; }
 .air-root .air-session:hover .air-session-when { opacity: 0; }
 
+/* „Mehr laden" — dezente, klare Zeile (kein Chip-Look) */
+.air-root .air-load-more { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; margin-top: 4px; padding: 8px; border: 0; border-radius: 7px; background: transparent; font-size: 12px; font-weight: 500; color: var(--muted-foreground); cursor: pointer; transition: background .12s ease, color .12s ease; }
+.air-root .air-load-more:hover { background: var(--sidebar-hover); color: var(--foreground); }
+.air-root .air-load-more .air-load-more-count { font-size: 11px; color: var(--muted-foreground); }
+
 /* ── Chat-Spalte (rechts) ── */
 .air-root .air-chat { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--background); }
 .air-root .air-chat-empty { flex: 1; display: grid; place-items: center; padding: 32px; text-align: center; color: var(--muted-foreground); }
@@ -150,7 +155,7 @@
 
 /* ── Thread ── */
 .air-root .air-thread { flex: 1; overflow-y: auto; padding: 18px 24px 8px; }
-.air-root .air-thread-inner { max-width: 760px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+.air-root .air-thread-inner { max-width: 1040px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
 
 .air-root .air-msg-ai { display: flex; gap: 13px; }
 .air-root .air-ai-avatar { width: 30px; height: 30px; flex: 0 0 30px; border-radius: 8px; overflow: hidden; background: var(--card); border: 1px solid var(--border); display: grid; place-items: center; }
@@ -179,7 +184,7 @@
 .air-root .icon-btn.is-active { color: var(--primary); background: var(--accent); }
 
 /* Datei-Anhang-Chip über dem Composer */
-.air-root .air-attach-chip { display: flex; align-items: center; gap: 8px; max-width: 760px; margin: 0 auto 8px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); font-size: 12px; color: var(--foreground); }
+.air-root .air-attach-chip { display: flex; align-items: center; gap: 8px; max-width: 1040px; margin: 0 auto 8px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); font-size: 12px; color: var(--foreground); }
 .air-root .air-attach-chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .air-root .air-attach-chip .x { margin-left: auto; display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 5px; color: var(--muted-foreground); cursor: pointer; border: 0; background: transparent; flex: 0 0 18px; }
 .air-root .air-attach-chip .x:hover { background: var(--muted); color: var(--foreground); }
@@ -208,13 +213,21 @@
 .air-root .air-regen .air-typing { padding-top: 0; }
 .air-root .air-regen-label { font-size: 12.5px; color: var(--muted-foreground); }
 
+/* Streaming-Reveal (ChatGPT-artig): Wörter blenden gestaffelt sanft ein — reines
+   Opacity-Fade, kein vertikaler Versatz (sonst „springt" der Text beim Aufbau). */
+.air-root .air-word { opacity: 0; animation: air-word-in .45s ease forwards; will-change: opacity; }
+@keyframes air-word-in { to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .air-root .air-word { opacity: 1; animation: none; }
+}
+
 /* ── Composer ── */
 .air-root .air-composer-wrap { padding: 10px 24px 16px; border-top: 1px solid var(--border); background: var(--background); }
-.air-root .air-suggest { display: flex; justify-content: flex-start; gap: 6px; flex-wrap: wrap; max-width: 760px; margin: 0 auto 10px; }
+.air-root .air-suggest { display: flex; justify-content: flex-start; gap: 6px; flex-wrap: wrap; max-width: 1040px; margin: 0 auto 10px; }
 .air-root .air-suggest-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: 99px; border: 1px solid var(--border); background: var(--card); font-size: 12px; font-weight: 500; color: var(--muted-foreground); cursor: pointer; transition: border-color .12s ease, background .12s ease, color .12s ease; }
 .air-root .air-suggest-chip:hover { border-color: var(--primary); color: var(--primary); background: var(--accent); }
 .air-root .air-suggest-chip:disabled { opacity: 0.5; cursor: not-allowed; }
-.air-root .air-composer { max-width: 760px; margin: 0 auto; background: var(--card); border: 1px solid var(--input); border-radius: 12px; padding: 7px 7px 7px 14px; display: flex; align-items: flex-end; gap: 10px; transition: border-color .12s ease, box-shadow .12s ease; }
+.air-root .air-composer { max-width: 1040px; margin: 0 auto; background: var(--card); border: 1px solid var(--input); border-radius: 12px; padding: 7px 7px 7px 14px; display: flex; align-items: flex-end; gap: 10px; transition: border-color .12s ease, box-shadow .12s ease; }
 .air-root .air-composer:focus-within { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 16%, transparent); }
 .air-root .air-composer textarea { flex: 1; border: 0; outline: 0; resize: none; background: transparent; font-size: 13.8px; line-height: 1.5; color: var(--foreground); font-family: inherit; padding: 7px 0; max-height: 160px; }
 .air-root .air-composer textarea::placeholder { color: var(--muted-foreground); opacity: 0.7; }
@@ -222,7 +235,7 @@
 .air-root .air-send { width: 36px; height: 36px; flex: 0 0 36px; border-radius: 9px; background: var(--primary); color: var(--primary-foreground); display: grid; place-items: center; border: 0; cursor: pointer; transition: background .12s ease, opacity .12s ease; }
 .air-root .air-send:hover { background: color-mix(in oklch, var(--primary) 88%, black); }
 .air-root .air-send:disabled { opacity: 0.4; cursor: not-allowed; }
-.air-root .air-composer-foot { max-width: 760px; margin: 8px auto 0; font-size: 11px; color: var(--muted-foreground); text-align: center; }
+.air-root .air-composer-foot { max-width: 1040px; margin: 8px auto 0; font-size: 11px; color: var(--muted-foreground); text-align: center; }
 
 /* ── Neue-Recherche-Modal ── */
 .air-root .air-modal-overlay { position: fixed; inset: 0; background: rgba(15,23,42,0.34); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); z-index: 200; display: grid; place-items: center; padding: 24px; animation: air-fade-in .15s ease; }
