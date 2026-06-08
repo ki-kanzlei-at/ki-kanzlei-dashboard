@@ -10,6 +10,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { fetchWebsiteData } from "@/lib/enrichment/pipeline";
 import { extractWithGemini } from "@/lib/enrichment/gemini";
+import { consumeCredits } from "@/lib/credits";
+import { CREDIT_COSTS } from "@/lib/billing/plans";
 
 function normalizeUrl(raw: string): string | null {
   const trimmed = raw.trim();
@@ -58,8 +60,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    /* 2) Gemini extrahiert strukturierte Felder. useGrounding=true falls keine
-     *    Hits in Stage 1 → CEO-Suche via Google Search (kostet etwas mehr). */
+    /* 1b) Credits abbuchen — diese Recherche nutzt Grounding (Google Search) und
+     *     kostet wie eine Lead-Anreicherung. Atomar, vor dem teuren AI-Call. */
+    const charge = await consumeCredits(user.id, "lead_enrich", {
+      metadata: { source: "enrich-from-url", url },
+    });
+    if (!charge.ok) {
+      const msg = charge.reason === "insufficient_credits"
+        ? "Nicht genug Credits für die AI-Recherche."
+        : "Credits konnten nicht abgebucht werden.";
+      return NextResponse.json({ error: msg, remaining: charge.remaining }, { status: 402 });
+    }
+
+    /* 2) Gemini extrahiert strukturierte Felder. useGrounding=true → CEO-/Größen-
+     *    Recherche via Google Search (gegroundet, wie beim AI-Researcher). */
     const result = await extractWithGemini(
       {
         companyName: companyHint || new URL(url).hostname.replace(/^www\./, ""),
@@ -103,6 +117,9 @@ export async function POST(request: NextRequest) {
         ceo_first_name:   result.ceo_first_name ?? null,
         ceo_last_name:    result.ceo_last_name ?? null,
         ceo_name:         ceoName,
+        employee_count:   result.employee_count != null ? String(result.employee_count) : null,
+        revenue:          result.revenue ?? null,
+        notes:            result.summary ?? null,
         social_linkedin:  websiteData.socialLinkedin ?? null,
         social_facebook:  websiteData.socialFacebook ?? null,
         social_instagram: websiteData.socialInstagram ?? null,
@@ -111,10 +128,12 @@ export async function POST(request: NextRequest) {
         social_tiktok:    websiteData.socialTiktok ?? null,
       },
       meta: {
-        pages_loaded:   websiteData.pagesLoaded,
-        emails_found:   websiteData.emails.length,
-        phones_found:   websiteData.phones.length,
-        confidence:     result.confidence_score ?? null,
+        pages_loaded:    websiteData.pagesLoaded,
+        emails_found:    websiteData.emails.length,
+        phones_found:    websiteData.phones.length,
+        confidence:      result.confidence_score ?? null,
+        credits_charged: CREDIT_COSTS.lead_enrich,
+        credits_left:    charge.remaining,
       },
     });
   } catch (error) {

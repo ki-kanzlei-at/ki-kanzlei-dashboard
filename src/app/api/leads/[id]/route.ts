@@ -63,6 +63,15 @@ export async function DELETE(
     if (!user) return NextResponse.json({ error: "Nicht authentifiziert" }, { status: 401 });
 
     const { id } = await params;
+    // Sync: verknüpfte AI-Researcher-Sessions entkoppeln, damit keine toten
+    // „gespeichert"-Links auf einen gelöschten Lead zeigen (RLS scoped den User).
+    try {
+      const supabase = await createClient();
+      await supabase.from("research_sessions").update({ saved_lead_id: null }).eq("saved_lead_id", id);
+      await supabase.from("research_sessions").update({ lead_id: null }).eq("lead_id", id);
+    } catch (e) {
+      console.error("[API /api/leads/[id]] DELETE: Session-Sync fehlgeschlagen", e);
+    }
     await deleteLead(id);
     return NextResponse.json({ success: true });
   } catch (error) {

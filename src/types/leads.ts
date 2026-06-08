@@ -64,6 +64,12 @@ export interface Lead {
 
   /* Firmendaten */
   legal_form: string | null;
+  /** Mitarbeiterzahl (AI-Schätzung) — nur befüllt wenn Größen-Filter aktiv */
+  employee_count: number | null;
+  /** Umsatz-Schätzung (AI), z. B. "1-5 Mio €" — nur befüllt wenn Größen-Filter aktiv */
+  revenue: string | null;
+  /** Erkannte Website-Technologien (shopify, wordpress, …) aus Homepage-Fingerprint */
+  tech_stack: string[] | null;
 
   /* Ansprechpartner */
   ceo_name: string | null;
@@ -101,11 +107,14 @@ export interface Lead {
 }
 
 /* Felder für das Erstellen eines neuen Leads */
-export type LeadInsert = Omit<Lead, "id" | "created_at" | "updated_at" | "state"> & {
+export type LeadInsert = Omit<Lead, "id" | "created_at" | "updated_at" | "state" | "employee_count" | "revenue" | "tech_stack"> & {
   id?: string;
   created_at?: string;
   updated_at?: string;
   state?: string | null;
+  employee_count?: number | null;
+  revenue?: string | null;
+  tech_stack?: string[] | null;
 };
 
 /* Felder für das Aktualisieren eines Leads (alle optional) */
@@ -115,6 +124,7 @@ export type LeadUpdate = Partial<Pick<Lead,
   | "industry" | "legal_form"
   | "ceo_name" | "ceo_title" | "ceo_first_name" | "ceo_last_name" | "ceo_gender" | "ceo_source"
   | "status" | "notes" | "raw_data"
+  | "employee_count" | "revenue" | "tech_stack"
   | "social_linkedin" | "social_facebook" | "social_instagram"
   | "social_twitter" | "social_youtube" | "social_tiktok"
 >>;
@@ -301,6 +311,14 @@ export interface SearchJob {
   require_email: boolean;
   /** Pipeline-Skip-Flag: nur Leads mit Website behalten. */
   require_website: boolean;
+  /** Komma-getrennte Tech-Filter (shopify,wordpress,…) oder null für alle. */
+  tech_stack: string | null;
+  /** Pflicht-Stichwort im Website-Inhalt oder null. */
+  website_keyword: string | null;
+  /** Mindest-Mitarbeiterzahl (AI-Schätzung) oder null. */
+  min_employees: number | null;
+  /** Obergrenze gespeicherter Leads pro Suche oder null = unbegrenzt. */
+  max_results: number | null;
   status: SearchJobStatus;
   results_count: number;
   total_count: number | null;
@@ -312,7 +330,7 @@ export interface SearchJob {
   updated_at: string;
 }
 
-export type SearchJobInsert = Omit<SearchJob, "id" | "created_at" | "updated_at" | "started_at" | "completed_at" | "results_count" | "total_count" | "estimated_end_at" | "error_message" | "status" | "city" | "company_type" | "require_ceo" | "require_email" | "require_website"> & {
+export type SearchJobInsert = Omit<SearchJob, "id" | "created_at" | "updated_at" | "started_at" | "completed_at" | "results_count" | "total_count" | "estimated_end_at" | "error_message" | "status" | "city" | "company_type" | "require_ceo" | "require_email" | "require_website" | "tech_stack" | "website_keyword" | "min_employees" | "max_results"> & {
   id?: string;
   status?: SearchJobStatus;
   radius_km?: number;
@@ -321,6 +339,10 @@ export type SearchJobInsert = Omit<SearchJob, "id" | "created_at" | "updated_at"
   require_ceo?: boolean;
   require_email?: boolean;
   require_website?: boolean;
+  tech_stack?: string | null;
+  website_keyword?: string | null;
+  min_employees?: number | null;
+  max_results?: number | null;
 };
 
 /* ── Länder-Mapping (ISO-Codes → Anzeigename) ── */
@@ -382,6 +404,24 @@ export const COMPANY_TYPE_OPTIONS = [
   { value: "kmag",       label: "KmAG (Kommandit-AG)" },
   { value: "verein",     label: "Verein" },
 ] as const;
+
+/* Website-Technologien für den Tech-Stack-Filter (stark für Webdesigner-Outreach).
+ * value = Fingerprint-Key (pipeline detectTechStack), label = UI-Anzeige. */
+export const TECH_STACK_OPTIONS = [
+  { value: "shopify",     label: "Shopify" },
+  { value: "woocommerce", label: "WooCommerce" },
+  { value: "wordpress",   label: "WordPress" },
+  { value: "wix",         label: "Wix" },
+  { value: "squarespace", label: "Squarespace" },
+  { value: "webflow",     label: "Webflow" },
+  { value: "shopware",    label: "Shopware" },
+  { value: "jtl",         label: "JTL-Shop" },
+  { value: "typo3",       label: "TYPO3" },
+  { value: "joomla",      label: "Joomla" },
+  { value: "jimdo",       label: "Jimdo" },
+] as const;
+
+export type TechStackKey = (typeof TECH_STACK_OPTIONS)[number]["value"];
 
 /* Bundesländer (Österreich) */
 export const BUNDESLAND_OPTIONS = [

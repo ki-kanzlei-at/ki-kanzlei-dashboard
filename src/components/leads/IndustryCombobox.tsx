@@ -77,7 +77,7 @@ export function IndustryCombobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className="w-[280px] p-0"
+        className="w-[280px] p-0 bg-white"
         align="start"
         /* Wheel-Event nicht an die darunterliegende ScrollArea (LeadEditSheet) bubblen.
          * Sonst scrollt die Sheet statt der Branchenliste, gefühlt "geht nicht". */

@@ -63,6 +63,10 @@ export async function POST(request: NextRequest) {
       require_ceo?: boolean;
       require_email?: boolean;
       require_website?: boolean;
+      tech_stack?: string[] | string;
+      website_keyword?: string;
+      min_employees?: number;
+      max_results?: number;
     };
     try {
       body = await request.json();
@@ -82,7 +86,27 @@ export async function POST(request: NextRequest) {
       require_ceo = false,
       require_email = false,
       require_website = false,
+      tech_stack,
+      website_keyword,
+      min_employees,
+      max_results,
     } = body;
+
+    // Tech-Stack-Filter normalisieren (Array oder Komma-String → bereinigtes Array)
+    const techStack = (Array.isArray(tech_stack)
+      ? tech_stack
+      : typeof tech_stack === "string" ? tech_stack.split(",") : [])
+      .map((s) => String(s).trim().toLowerCase())
+      .filter(Boolean);
+    const websiteKeyword = typeof website_keyword === "string" && website_keyword.trim().length > 0
+      ? website_keyword.trim()
+      : undefined;
+    const minEmployees = typeof min_employees === "number" && Number.isFinite(min_employees) && min_employees > 0
+      ? Math.round(min_employees)
+      : undefined;
+    const maxResults = typeof max_results === "number" && Number.isFinite(max_results) && max_results > 0
+      ? Math.round(max_results)
+      : undefined;
 
     if (!query || typeof query !== "string" || query.trim().length === 0) {
       return NextResponse.json(
@@ -121,6 +145,10 @@ export async function POST(request: NextRequest) {
       require_ceo,
       require_email,
       require_website,
+      tech_stack: techStack.length > 0 ? techStack.join(",") : null,
+      website_keyword: websiteKeyword ?? null,
+      min_employees: minEmployees ?? null,
+      max_results: maxResults ?? null,
     });
 
     // Über Scheduler einreihen — startet direkt oder bleibt pending (Queue)
@@ -135,6 +163,10 @@ export async function POST(request: NextRequest) {
       requireCeo: require_ceo,
       requireEmail: require_email,
       requireWebsite: require_website,
+      techStack: techStack.length > 0 ? techStack : undefined,
+      websiteKeyword,
+      minEmployees,
+      maxResults,
     });
 
     return NextResponse.json(

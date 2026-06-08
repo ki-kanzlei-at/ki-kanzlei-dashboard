@@ -30,6 +30,7 @@ import {
 } from "@/types/leads";
 import { DACH_COUNTRIES } from "@/lib/countries";
 import { FilterCombobox } from "@/components/leads/FilterCombobox";
+import { Slider } from "@/components/ui/slider";
 
 const searchSchema = z
   .object({
@@ -41,6 +42,8 @@ const searchSchema = z
     require_ceo:  z.boolean().optional(),
     require_email: z.boolean().optional(),
     require_website: z.boolean().optional(),
+    min_employees: z.string().optional(),
+    max_results:  z.string().optional(),
   })
   .superRefine((data, ctx) => {
     const hasQuery     = data.query && data.query.trim().length >= 2;
@@ -94,6 +97,8 @@ export function LeadSearchForm({ onSubmit, isSearching, defaultCountry, defaultR
       require_ceo: defaultRequireCeo ?? false,
       require_email: false,
       require_website: false,
+      min_employees: "",
+      max_results: "",
     },
   });
 
@@ -122,6 +127,9 @@ export function LeadSearchForm({ onSubmit, isSearching, defaultCountry, defaultR
       require_ceo: values.require_ceo,
       require_email: values.require_email,
       require_website: values.require_website,
+      // Filter beibehalten über mehrere Suchen hinweg
+      min_employees: values.min_employees,
+      max_results: values.max_results,
     });
   }
 
@@ -263,7 +271,7 @@ export function LeadSearchForm({ onSubmit, isSearching, defaultCountry, defaultR
                         <SelectValue placeholder="Alle Rechtsformen" />
                       </SelectTrigger>
                     </FormControl>
-                    <SelectContent>
+                    <SelectContent className="bg-white">
                       {COMPANY_TYPE_OPTIONS.map((opt) => (
                         <SelectItem key={opt.value} value={opt.value} className="text-sm">
                           {opt.label}
@@ -276,74 +284,63 @@ export function LeadSearchForm({ onSubmit, isSearching, defaultCountry, defaultR
             />
           </div>
 
-          {/* Footer: Toggles */}
-          <div className="flex flex-wrap items-center gap-4 pt-1 text-[13px] text-muted-foreground">
+          {/* Kompakte Zeile: Anzahl Leads · Min. Mitarbeiter · Qualitäts-Toggles */}
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3 pt-1">
             <FormField
               control={form.control}
-              name="require_ceo"
-              render={({ field }) => (
-                <FormItem className="space-y-0">
-                  <div className="flex items-center gap-2">
-                    <FormControl>
-                      <Checkbox
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                        id="require-ceo"
-                        className="h-3.5 w-3.5"
-                      />
-                    </FormControl>
-                    <label htmlFor="require-ceo" className="text-[12.5px] cursor-pointer leading-none text-foreground">
-                      Nur mit Geschäftsführer:in
-                    </label>
-                  </div>
-                </FormItem>
-              )}
+              name="max_results"
+              render={({ field }) => {
+                const n = field.value ? Number(field.value) : 0;
+                return (
+                  <FormItem className="flex items-center gap-3 space-y-0">
+                    <FormLabel className="m-0 whitespace-nowrap text-xs font-medium text-muted-foreground">Anzahl Leads</FormLabel>
+                    <Slider
+                      min={0}
+                      max={500}
+                      step={10}
+                      value={[n]}
+                      onValueChange={([v]) => field.onChange(v === 0 ? "" : String(v))}
+                      className="w-44"
+                    />
+                    <span className="w-10 shrink-0 text-xs font-normal tabular-nums text-muted-foreground">{n === 0 ? "Alle" : n}</span>
+                  </FormItem>
+                );
+              }}
             />
 
             <FormField
               control={form.control}
-              name="require_email"
+              name="min_employees"
               render={({ field }) => (
-                <FormItem className="space-y-0">
-                  <div className="flex items-center gap-2">
-                    <FormControl>
-                      <Checkbox
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                        id="require-email"
-                        className="h-3.5 w-3.5"
-                      />
-                    </FormControl>
-                    <label htmlFor="require-email" className="text-[12.5px] cursor-pointer leading-none text-foreground">
-                      Mit verifizierter E-Mail
-                    </label>
-                  </div>
+                <FormItem className="flex items-center gap-2 space-y-0">
+                  <FormLabel className="m-0 whitespace-nowrap text-xs font-medium text-muted-foreground">Min. Mitarbeiter</FormLabel>
+                  <FormControl>
+                    <Input type="number" min={1} placeholder="z. B. 10" className="h-8 w-24 bg-card text-sm" {...field} />
+                  </FormControl>
                 </FormItem>
               )}
             />
 
-            <FormField
-              control={form.control}
-              name="require_website"
-              render={({ field }) => (
-                <FormItem className="space-y-0">
-                  <div className="flex items-center gap-2">
-                    <FormControl>
-                      <Checkbox
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                        id="require-website"
-                        className="h-3.5 w-3.5"
-                      />
-                    </FormControl>
-                    <label htmlFor="require-website" className="text-[12.5px] cursor-pointer leading-none text-foreground">
-                      Mit Website
-                    </label>
-                  </div>
-                </FormItem>
-              )}
-            />
-
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <FormField control={form.control} name="require_ceo" render={({ field }) => (
+                <FormItem className="space-y-0"><div className="flex items-center gap-2">
+                  <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} id="require-ceo" className="h-3.5 w-3.5" /></FormControl>
+                  <label htmlFor="require-ceo" className="text-[12.5px] cursor-pointer leading-none text-foreground">Nur mit Geschäftsführer:in</label>
+                </div></FormItem>
+              )} />
+              <FormField control={form.control} name="require_email" render={({ field }) => (
+                <FormItem className="space-y-0"><div className="flex items-center gap-2">
+                  <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} id="require-email" className="h-3.5 w-3.5" /></FormControl>
+                  <label htmlFor="require-email" className="text-[12.5px] cursor-pointer leading-none text-foreground">Mit verifizierter E-Mail</label>
+                </div></FormItem>
+              )} />
+              <FormField control={form.control} name="require_website" render={({ field }) => (
+                <FormItem className="space-y-0"><div className="flex items-center gap-2">
+                  <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} id="require-website" className="h-3.5 w-3.5" /></FormControl>
+                  <label htmlFor="require-website" className="text-[12.5px] cursor-pointer leading-none text-foreground">Mit Website</label>
+                </div></FormItem>
+              )} />
+            </div>
           </div>
 
         </CardContent>
