@@ -27,6 +27,8 @@ const routeMeta: Record<string, { label: string; parent?: string }> = {
     "/dashboard/campaigns":        { label: "E-Mail-Kampagnen", parent: "Dashboard" },
     "/dashboard/campaigns/new":    { label: "Neue Kampagne", parent: "Dashboard" },
     "/dashboard/linkedin":         { label: "LinkedIn",      parent: "Dashboard" },
+    "/dashboard/social-media":     { label: "Social Media",  parent: "Dashboard" },
+    "/dashboard/seo":              { label: "SEO",           parent: "Dashboard" },
     "/dashboard/email-outreach":   { label: "Emails",        parent: "Dashboard" },
     "/dashboard/settings":         { label: "Einstellungen", parent: "Dashboard" },
 };

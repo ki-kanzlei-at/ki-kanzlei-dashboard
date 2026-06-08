@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
     LayoutDashboard, Users, Send, Share2, Linkedin,
     Settings, ChevronsUpDown,
-    LogOut, BadgeCheck, Bell, Loader2,
+    LogOut, BadgeCheck, Loader2,
     Inbox, MessageCircle, BookOpen, ExternalLink,
 } from "lucide-react";
 
@@ -183,10 +183,11 @@ export function AppSidebar({ user, role = "user" }: AppSidebarProps) {
 
             {/* ── Content ── */}
             <SidebarContent>
-                <SidebarGroup>
-                    <SidebarGroupContent>
-                        <SidebarMenu>
-                            {sections.flatMap((s) => s.items).map((item) => {
+                {sections.map((section) => (
+                    <SidebarGroup key={section.label} className="py-1">
+                        <SidebarGroupContent>
+                            <SidebarMenu>
+                                {section.items.map((item) => {
                                     const { name, href, icon: Icon, disabled, pip, count, isLeadsCount, isLinkedInCount } = item;
                                     const active = isActive(pathname, href);
                                     const displayCount = isLeadsCount
@@ -240,9 +241,10 @@ export function AppSidebar({ user, role = "user" }: AppSidebarProps) {
                                         </SidebarMenuItem>
                                     );
                                 })}
-                        </SidebarMenu>
-                    </SidebarGroupContent>
-                </SidebarGroup>
+                            </SidebarMenu>
+                        </SidebarGroupContent>
+                    </SidebarGroup>
+                ))}
             </SidebarContent>
 
             {/* ── Footer / User ── */}
@@ -321,9 +323,11 @@ export function AppSidebar({ user, role = "user" }: AppSidebarProps) {
                                             Mein Profil
                                         </Link>
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem className="mx-1.5 gap-3 cursor-pointer">
-                                        <Bell className="h-4 w-4 text-muted-foreground" />
-                                        Benachrichtigungen
+                                    <DropdownMenuItem asChild className="mx-1.5 gap-3 cursor-pointer">
+                                        <Link href="/dashboard/settings">
+                                            <Settings className="h-4 w-4 text-muted-foreground" />
+                                            Einstellungen
+                                        </Link>
                                     </DropdownMenuItem>
                                 </DropdownMenuGroup>
 

@@ -9,7 +9,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -126,9 +127,14 @@ function Rail({
                   <MoreHorizontal width={15} height={15} />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-white" onClick={(e) => e.stopPropagation()}>
-                <DropdownMenuItem variant="destructive" onClick={(e) => { e.stopPropagation(); onDelete(s.id); }}>
-                  <Trash2 className="h-4 w-4" /> Recherche löschen
+              <DropdownMenuContent align="end" className="w-44 bg-white" onClick={(e) => e.stopPropagation()}>
+                <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Aktionen</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-xs gap-2 cursor-pointer text-destructive focus:text-destructive"
+                  onClick={(e) => { e.stopPropagation(); onDelete(s.id); }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Löschen
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
