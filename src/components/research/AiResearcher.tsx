@@ -42,6 +42,11 @@ const AUDIENCE_STEPS = [
 ];
 
 
+/* Branche kürzen, damit Branche + Ort in die Rail-Breite passen */
+function abbrev(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 1).trimEnd() + "…" : s;
+}
+
 function relTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const min = Math.floor(diff / 60000);
@@ -119,7 +124,7 @@ function Rail({
                 <div className="air-session-name">{s.company}</div>
                 <span className="air-session-when">{relTime(s.updated_at)}</span>
               </div>
-              <div className="air-session-meta">{[s.industry, s.city].filter(Boolean).join(" · ") || "Recherche"}</div>
+              <div className="air-session-meta">{[s.industry ? abbrev(s.industry, s.city ? 20 : 32) : null, s.city].filter(Boolean).join(" · ") || "Recherche"}</div>
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -412,16 +417,18 @@ function ChatColumn({
       <div className="air-chat-head">
         <Favicon web={session.website} company={session.company} />
         <div className="air-chat-head-info">
-          <h2>{session.company}</h2>
+          <div className="air-chat-head-title">
+            <h2>{session.company}</h2>
+            {session.status && <StatusBadge status={session.status} />}
+          </div>
           <div className="sub">
             <IndustryTag industry={session.industry} />
-            {session.website && <><span className="air-sep" /><a href={`https://${normalizeDomain(session.website)}`} target="_blank" rel="noreferrer">{normalizeDomain(session.website)}</a></>}
-            {session.city && <><span className="air-sep" /><span>{[session.city, session.state].filter(Boolean).join(", ")}</span></>}
+            {session.website && <a href={`https://${normalizeDomain(session.website)}`} target="_blank" rel="noreferrer">{normalizeDomain(session.website)}</a>}
+            {session.city && <span>{[session.city, session.state].filter(Boolean).join(", ")}</span>}
           </div>
         </div>
         {session.score != null && (
           <div className="air-head-score">
-            {session.status && <StatusBadge status={session.status} />}
             <Score value={session.score} />
           </div>
         )}

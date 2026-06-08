@@ -120,7 +120,9 @@
 .air-root .air-chat-head { padding: 14px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 14px; background: var(--card); }
 .air-root .air-chat-head .favicon { width: 40px; height: 40px; border-radius: 9px; }
 .air-root .air-chat-head-info { flex: 1; min-width: 0; }
-.air-root .air-chat-head h2 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.012em; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.air-root .air-chat-head-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.air-root .air-chat-head h2 { margin: 0; min-width: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.012em; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.air-root .air-chat-head-title .badge-status { flex: 0 0 auto; }
 .air-root .air-chat-head .sub { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted-foreground); margin-top: 3px; }
 .air-root .air-chat-head .sub a:hover { color: var(--primary); }
 .air-root .air-sep { width: 3px; height: 3px; border-radius: 50%; background: var(--border-strong); flex: 0 0 3px; }

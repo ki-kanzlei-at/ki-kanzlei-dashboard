@@ -183,11 +183,10 @@ export function AppSidebar({ user, role = "user" }: AppSidebarProps) {
 
             {/* ── Content ── */}
             <SidebarContent>
-                {sections.map((section) => (
-                    <SidebarGroup key={section.label} className="py-1">
-                        <SidebarGroupContent>
-                            <SidebarMenu>
-                                {section.items.map((item) => {
+                <SidebarGroup>
+                    <SidebarGroupContent>
+                        <SidebarMenu>
+                            {sections.flatMap((s) => s.items).map((item) => {
                                     const { name, href, icon: Icon, disabled, pip, count, isLeadsCount, isLinkedInCount } = item;
                                     const active = isActive(pathname, href);
                                     const displayCount = isLeadsCount
@@ -240,11 +239,10 @@ export function AppSidebar({ user, role = "user" }: AppSidebarProps) {
                                             </SidebarMenuButton>
                                         </SidebarMenuItem>
                                     );
-                                })}
-                            </SidebarMenu>
-                        </SidebarGroupContent>
-                    </SidebarGroup>
-                ))}
+                            })}
+                        </SidebarMenu>
+                    </SidebarGroupContent>
+                </SidebarGroup>
             </SidebarContent>
 
             {/* ── Footer / User ── */}

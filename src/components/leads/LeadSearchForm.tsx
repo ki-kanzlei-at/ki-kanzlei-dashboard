@@ -194,7 +194,7 @@ export function LeadSearchForm({ onSubmit, isSearching, defaultCountry, defaultR
                     placeholder={`${regionLabel} wählen`}
                     searchPlaceholder={`${regionLabel} suchen…`}
                     emptyText={`Kein ${regionLabel} gefunden`}
-                    className="w-full"
+                    className="w-full bg-card"
                   />
                   <FormMessage className="text-[11px]" />
                 </FormItem>
@@ -215,7 +215,7 @@ export function LeadSearchForm({ onSubmit, isSearching, defaultCountry, defaultR
                 placeholder="Land wählen"
                 searchPlaceholder="Land suchen…"
                 emptyText="Kein Land gefunden"
-                className="w-full"
+                className="w-full bg-card"
               />
             </FormItem>
 
