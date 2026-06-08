@@ -62,6 +62,14 @@ interface PipelineParams {
   requireCeo?: boolean;
   requireEmail?: boolean;
   requireWebsite?: boolean;
+  /** Tech-Stack-Filter (shopify, wordpress, …) — Lead muss mind. eine Tech haben. */
+  techStack?: string[];
+  /** Pflicht-Stichwort im Website-Inhalt. */
+  websiteKeyword?: string;
+  /** Mindest-Mitarbeiterzahl (AI-Schätzung). */
+  minEmployees?: number;
+  /** Obergrenze gespeicherter Leads; sobald erreicht, stoppt der Lauf. */
+  maxResults?: number;
 }
 
 /* ── Legal-Form Fallback aus Firmennamen ──
@@ -151,6 +159,8 @@ interface WebsiteData {
   phones: string[];
   websiteContent: string;
   pagesLoaded: string[];
+  /** Erkannte Website-Technologien (shopify, wordpress, …) aus dem Homepage-HTML */
+  techStack: string[];
   socialLinkedin: string | null;
   socialFacebook: string | null;
   socialInstagram: string | null;
@@ -158,6 +168,35 @@ interface WebsiteData {
   socialTwitter: string | null;
   socialYoutube: string | null;
   socialTiktok: string | null;
+}
+
+/* ── Website-Tech-Stack-Fingerprint ──
+ * Erkennt verbreitete CMS/Shop-Systeme aus dem rohen Homepage-HTML
+ * (Marker in Markup/Script-Pfaden). Konservativ — nur eindeutige Treffer.
+ * Keys spiegeln TECH_STACK_OPTIONS (types/leads). */
+const TECH_PATTERNS: Array<[string, RegExp]> = [
+  ["shopify",     /cdn\.shopify\.com|\.myshopify\.com|Shopify\.theme/i],
+  ["woocommerce", /woocommerce/i],
+  ["wordpress",   /wp-content|wp-includes|content="WordPress/i],
+  ["wix",         /static\.wixstatic\.com|_wixCssImports|wixsite\.com/i],
+  ["squarespace", /static1\.squarespace\.com|squarespace\.com/i],
+  ["webflow",     /\.webflow\.io|data-wf-page|assets\.website-files\.com/i],
+  ["shopware",    /shopware/i],
+  ["jtl",         /jtl-shop|JTLSHOP/i],
+  ["typo3",       /typo3conf|\/typo3\//i],
+  ["joomla",      /Joomla!|\/media\/jui\//i],
+  ["jimdo",       /jimdo|jimcdn\.com/i],
+];
+
+function detectTechStack(html: string): string[] {
+  if (!html) return [];
+  const found: string[] = [];
+  for (const [key, re] of TECH_PATTERNS) {
+    if (re.test(html)) found.push(key);
+  }
+  // WooCommerce läuft immer auf WordPress → „wordpress"-Filter soll WooCommerce-Sites mittreffen
+  if (found.includes("woocommerce") && !found.includes("wordpress")) found.push("wordpress");
+  return found;
 }
 
 /* ══════════════════════════════════════════════════════
@@ -195,7 +234,27 @@ const DEPRIORITIZED_EMAIL_PREFIXES = [
   "dsb", "datenschutz", "privacy", "dsgvo",
   "newsletter", "marketing", "spam",
   "webmaster", "admin", "root",
+  // Generische Rollen-Postfächer, bei denen sich „kein Schwein meldet"
+  "presse", "press", "media", "pr",
+  "service", "kundenservice", "kundendienst", "support", "helpdesk", "hilfe",
+  "abuse", "billing", "buchhaltung", "rechnung", "invoice",
 ];
+
+/** Lokalteil gehört zur Entscheider-Person? (z. B. „m.mustermann", „max.mustermann", „mustermann") */
+function emailMatchesPerson(prefix: string, ceoName?: string | null): boolean {
+  if (!ceoName) return false;
+  const TITLES = new Set(["mag", "dr", "ing", "di", "mba", "herr", "frau", "prof", "dipl", "msc", "bsc"]);
+  const names = ceoName.toLowerCase()
+    .replace(/[^a-zäöüß\s.-]/g, " ")
+    .split(/\s+/)
+    .map((p) => p.replace(/\./g, "").trim())
+    .filter((p) => p.length >= 3 && !TITLES.has(p));
+  if (names.length === 0) return false;
+  const p = prefix.toLowerCase().replace(/[._-]/g, "");
+  // Nachname (längster Teil) sollte im Lokalteil stecken
+  const lastName = names.reduce((a, b) => (b.length > a.length ? b : a), "");
+  return p.includes(lastName);
+}
 
 function sanitizeEmail(email: string): string {
   let cleaned = email
@@ -223,7 +282,7 @@ function isValidEmail(email: string): boolean {
   return true;
 }
 
-function selectBestEmail(emails: string[], companyWebsite: string): string | null {
+function selectBestEmail(emails: string[], companyWebsite: string, ceoName?: string | null): string | null {
   if (emails.length === 0) return null;
 
   let companyDomain = "";
@@ -247,6 +306,8 @@ function selectBestEmail(emails: string[], companyWebsite: string): string | nul
 
   function emailScore(email: string): number {
     const prefix = email.split("@")[0];
+    // Persönliche Entscheider-Adresse schlägt alles (z. B. m.mustermann@…)
+    if (emailMatchesPerson(prefix, ceoName)) return -1;
     if (preferred.some((p) => email.startsWith(p))) return 0;
     if (deprioritized.some((dp) => prefix.startsWith(dp))) return 2;
     return 1;
@@ -278,6 +339,10 @@ export async function runEnrichmentPipeline(params: PipelineParams): Promise<voi
     requireCeo = false,
     requireEmail = false,
     requireWebsite = false,
+    techStack = [],
+    websiteKeyword,
+    minEmployees,
+    maxResults,
   } = params;
   const stats = newJobStats();
 
@@ -378,9 +443,13 @@ export async function runEnrichmentPipeline(params: PipelineParams): Promise<voi
 
     const queue = [...allPlaces];
     let queueIndex = 0;
+    // Obergrenze: sobald genug Leads gespeichert sind, stoppen alle Worker.
+    let limitReached = false;
+    // Synchron reservierte Insert-Slots → harter Cap ohne Overshoot trotz paralleler Worker.
+    let reservedCount = 0;
 
     const workers = Array.from({ length: Math.min(CONCURRENCY, allPlaces.length) }, async (_, workerId) => {
-      while (queue.length > 0 && !cancelledFlag) {
+      while (queue.length > 0 && !cancelledFlag && !limitReached) {
         const place = queue.shift()!;
         const idx = queueIndex++;
         const companyName = place.displayName?.text || "Unbekannt";
@@ -428,19 +497,31 @@ export async function runEnrichmentPipeline(params: PipelineParams): Promise<voi
             continue;
           }
 
+          // Optimierung: Tech-/Keyword-Filter brauchen zwingend eine Website.
+          // Ohne Website kann nichts matchen → direkt skippen, spart den Enrich-Call.
+          if ((techStack.length > 0 || websiteKeyword) && !hasWebsite) {
+            console.log(`[Pipeline] [W${workerId}]   → Skip (kein Website, aber Tech/Keyword-Filter aktiv)`);
+            processedCount++;
+            timings.push(Date.now() - companyStart);
+            await updateETA(jobId, resultsCount, processedCount, allPlaces.length, timings, CONCURRENCY);
+            continue;
+          }
+
           // 3. Hauptarbeit: enrich (Gemini-Calls werden in stats getrackt)
           const matchedBranch = branchByPlaceId.get(place.id) || branches[0] || query;
           const lead = await withTimeout(
-            enrichAndBuildLead(place, matchedBranch, location, country, userId, jobId, stats, requireCeo),
+            enrichAndBuildLead(place, matchedBranch, location, country, userId, jobId, stats, requireCeo, {
+              techStack, websiteKeyword, minEmployees,
+            }),
             COMPANY_TIMEOUT_MS,
             `Timeout bei "${companyName}" nach ${COMPANY_TIMEOUT_MS / 1000}s`,
           );
 
           if (!lead) {
-            console.log(`[Pipeline] [W${workerId}]   → Skip (keine valide Email)`);
+            console.log(`[Pipeline] [W${workerId}]   → Skip (keine valide Email oder Filter nicht erfüllt)`);
             stats.noEmailSkipped++;
-          } else if (companyType !== "all" && lead.legal_form && !matchesCompanyType(lead.legal_form, companyType)) {
-            console.log(`[Pipeline] [W${workerId}]   → Skip (Rechtsform ${lead.legal_form} ≠ ${companyType})`);
+          } else if (companyType !== "all" && !matchesCompanyType(lead.legal_form ?? "", companyType)) {
+            console.log(`[Pipeline] [W${workerId}]   → Skip (Rechtsform ${lead.legal_form ?? "unbekannt"} ≠ ${companyType}, strikt)`);
           } else if (requireCeo && !lead.ceo_name) {
             console.log(`[Pipeline] [W${workerId}]   → Skip (kein Geschäftsführer gefunden, requireCeo aktiv)`);
             stats.noCeoSkipped++;
@@ -449,16 +530,25 @@ export async function runEnrichmentPipeline(params: PipelineParams): Promise<voi
             stats.noEmailSkipped++;
           } else if (requireWebsite && !lead.website) {
             console.log(`[Pipeline] [W${workerId}]   → Skip (keine Website gefunden, requireWebsite aktiv)`);
+          } else if (minEmployees && (!lead.employee_count || lead.employee_count < minEmployees)) {
+            console.log(`[Pipeline] [W${workerId}]   → Skip (Mitarbeiter ${lead.employee_count ?? "?"} < ${minEmployees})`);
           } else {
             // 4. Email-Dupe-Check (gegen lokales Set, kein DB-Roundtrip)
             const emailLower = (lead.email || "").toLowerCase();
             if (emailLower && existingEmails.has(emailLower)) {
               console.log(`[Pipeline] [W${workerId}]   → Skip (Duplikat - email schon im CRM)`);
               stats.duplicatesSkipped++;
+            } else if (maxResults && reservedCount >= maxResults) {
+              // Harter Cap: Slot wird SYNCHRON reserviert (kein await zwischen Check und ++),
+              // daher kann kein zweiter Worker dieselbe Reservierung gewinnen → kein Overshoot.
+              limitReached = true;
             } else {
+              // Slot reservieren, bevor der async-Insert läuft
+              if (maxResults) reservedCount++;
               // Insert + lokale Sets updaten (gegen Race-Condition zwischen Workers)
               const { error } = await getSupabaseAdmin().from("leads").insert(lead);
               if (error) {
+                if (maxResults) reservedCount--; // Slot wieder freigeben
                 // Wenn unique-constraint greift, ist's auch ein Dupe → ok
                 if (error.code === "23505") {
                   console.log(`[Pipeline] [W${workerId}]   → Skip (Race-Duplikat von DB abgefangen)`);
@@ -471,6 +561,11 @@ export async function runEnrichmentPipeline(params: PipelineParams): Promise<voi
                 stats.inserts++;
                 if (place.id) existingPlaceIds.add(place.id);
                 if (emailLower) existingEmails.add(emailLower);
+                // Obergrenze erreicht → restliche Worker stoppen
+                if (maxResults && resultsCount >= maxResults) {
+                  limitReached = true;
+                  console.log(`[Pipeline] Limit von ${maxResults} Leads erreicht — Lauf wird gestoppt.`);
+                }
               }
             }
           }
@@ -865,14 +960,18 @@ export async function fetchWebsiteData(baseUrl: string): Promise<WebsiteData> {
     }
   }
 
+  // Tech-Stack aus dem rohen Homepage-HTML (Marker stehen oft nur dort, nicht im Text)
+  const techStack = homepageResult ? detectTechStack(homepageResult.html) : [];
+
   const elapsed = ((Date.now() - scrapingStart) / 1000).toFixed(1);
-  console.log(`[Scraping] ${pagesLoaded.length} Seiten in ${elapsed}s (${pagesLoaded.join(", ")})`);
+  console.log(`[Scraping] ${pagesLoaded.length} Seiten in ${elapsed}s (${pagesLoaded.join(", ")})${techStack.length ? ` · Tech: ${techStack.join(", ")}` : ""}`);
 
   return {
     emails: [...new Set(emailsFound)],
     phones: [...new Set(phonesFound)],
     websiteContent: combinedText.substring(0, 8000),
     pagesLoaded,
+    techStack,
     socialLinkedin: allSocials["linkedin"] || null,
     socialFacebook: allSocials["facebook"] || null,
     socialInstagram: allSocials["instagram"] || null,
@@ -896,9 +995,13 @@ async function enrichAndBuildLead(
   jobId: string,
   stats: JobStats,
   requireCeo: boolean,
+  filters: { techStack?: string[]; websiteKeyword?: string; minEmployees?: number } = {},
 ): Promise<LeadInsert | null> {
   const companyName = place.displayName?.text || "";
   const website = (place.websiteUri || "").replace(/\/$/, "");
+  const wantsTech = (filters.techStack?.length ?? 0) > 0;
+  const wantsKeyword = !!filters.websiteKeyword?.trim();
+  const wantsSize = (filters.minEmployees ?? 0) > 0;
 
   // Website scrapen (CEO-Suche macht jetzt Gemini via Google Search Grounding)
   const websiteData = website
@@ -911,13 +1014,34 @@ async function enrichAndBuildLead(
       })
     : null;
 
+  // ── Pre-Gemini-Filter: Tech-Stack & Website-Keyword ──
+  // Beide werden aus dem (gratis) Website-Scrape geprüft, BEVOR der teure Gemini-Call läuft.
+  if (wantsTech || wantsKeyword) {
+    // Ohne erreichbare Website kann weder Tech noch Keyword geprüft werden → verwerfen
+    if (!websiteData) {
+      console.log(`[Pipeline] Filter-Skip (keine Website für Tech/Keyword-Prüfung): ${companyName}`);
+      return null;
+    }
+    if (wantsTech && !websiteData.techStack.some((t) => filters.techStack!.includes(t))) {
+      console.log(`[Pipeline] Filter-Skip (Tech-Stack [${websiteData.techStack.join(",") || "none"}] passt nicht): ${companyName}`);
+      return null;
+    }
+    if (wantsKeyword) {
+      const kw = filters.websiteKeyword!.trim().toLowerCase();
+      if (!websiteData.websiteContent.toLowerCase().includes(kw)) {
+        console.log(`[Pipeline] Filter-Skip (Keyword "${filters.websiteKeyword}" nicht im Website-Inhalt): ${companyName}`);
+        return null;
+      }
+    }
+  }
+
   // Valide Emails aus Scraping
   const validEmails = (websiteData?.emails || []).map(sanitizeEmail).filter(isValidEmail);
 
-  // Pre-Check 2: skip Gemini wenn Website nicht erreichbar UND keine Email gefunden UND nicht requireCeo
+  // Pre-Check 2: skip Gemini wenn Website nicht erreichbar UND keine Email gefunden UND nicht requireCeo/Größen-Filter
   // Gemini würde dann sowieso nichts finden können → drop ohne API-Call sparen
   const noViableSource = !websiteData && validEmails.length === 0;
-  if (noViableSource && !requireCeo) {
+  if (noViableSource && !requireCeo && !wantsSize) {
     stats.geminiSkipped++;
     return null;
   }
@@ -941,7 +1065,9 @@ async function enrichAndBuildLead(
     set stage2Calls(v: number) { stats.geminiStage2 = v; },
   };
   let aiResult = await extractWithGemini(geminiInput, {
-    useGrounding: requireCeo,
+    // Größen-Filter nutzt Grounding (echte Quellen wie LinkedIn/Register), wie der AI Researcher
+    useGrounding: requireCeo || wantsSize,
+    needSize: wantsSize,
     stats: geminiStatsAdapter,
   });
 
@@ -962,7 +1088,7 @@ async function enrichAndBuildLead(
     }
   }
   if (!bestEmail) {
-    bestEmail = selectBestEmail(websiteData?.emails || [], website);
+    bestEmail = selectBestEmail(websiteData?.emails || [], website, aiResult ? buildCeoName(aiResult) : null);
   }
 
   // Keine valide Email → skip
@@ -1005,6 +1131,9 @@ async function enrichAndBuildLead(
     legal_form: aiResult?.legal_form
       || detectLegalFormFromName(aiResult?.company_name || companyName)
       || null,
+    employee_count: aiResult?.employee_count ?? null,
+    revenue: aiResult?.revenue ?? null,
+    tech_stack: websiteData?.techStack && websiteData.techStack.length > 0 ? websiteData.techStack : null,
     ceo_name: ceoName,
     ceo_title: aiResult?.ceo_title || null,
     ceo_first_name: aiResult?.ceo_first_name || null,
@@ -1035,6 +1164,8 @@ async function enrichAndBuildLead(
       website_content_preview: websiteData?.websiteContent?.substring(0, 500) || null,
       confidence_score: aiResult?.confidence_score ?? null,
       ai_extraction: !!aiResult,
+      // Default-Kurzbeschreibung „was sie tun" fürs Lead-Sheet (Website-Content ist eh da)
+      ...(aiResult?.summary ? { ai_research: { summary: aiResult.summary, updated_at: new Date().toISOString() } } : {}),
     },
     user_id: userId,
   };
@@ -1072,16 +1203,37 @@ function parseAddress(address: string, defaultCountry: string) {
   return { street, city, postalCode, country };
 }
 
+/* Strikte Rechtsform-Prüfung über AT/DE/CH. Unbekannte Filter → false (nichts durchlassen). */
 function matchesCompanyType(legalForm: string, filter: string): boolean {
-  const lf = legalForm.toLowerCase();
+  if (!legalForm) return false;
+  // Punkte/NBSP zu Leerzeichen, gepolstert für Wortgrenzen-Checks
+  const lf = ` ${legalForm.toLowerCase().replace(/[. ]/g, " ").replace(/\s+/g, " ")} `;
+  const has = (s: string) => lf.includes(s);
+  const word = (s: string) => new RegExp(`(^| )${s}( |$)`).test(lf);
+  const cokg = has("co") && word("kg");
   switch (filter) {
-    case "gmbh": return lf.includes("gmbh") && !lf.includes("co kg");
-    case "eu": return lf.includes("e.u.") || lf.includes("einzelunternehmen");
-    case "ag": return lf.includes("ag") && !lf.includes("gmbh");
-    case "og": return lf.includes("og");
-    case "kg": return lf.includes("kg") && !lf.includes("gmbh");
-    case "gmbh_cokg": return lf.includes("gmbh") && lf.includes("co kg");
-    default: return true;
+    case "gmbh_cokg": return has("gmbh") && cokg;
+    case "gmbh":      return (has("gmbh") || has("gesellschaft mit beschränkter")) && !cokg;
+    case "ag":        return (word("ag") || has("aktiengesellschaft")) && !has("gmbh") && !has("kgaa") && !has("kmag");
+    case "kgaa":      return has("kgaa");
+    case "kmag":      return has("kmag") || has("kommandit-ag");
+    case "ug":        return word("ug") || has("haftungsbeschränkt");
+    case "eu":        return has("e u") || has("einzelunternehmen");
+    case "og":        return word("og") || has("offene gesellschaft");
+    case "ohg":       return has("ohg") || has("offene handelsgesellschaft");
+    case "kg":        return word("kg") && !has("gmbh") && !has("kgaa") && !has("kmg");
+    case "kmg":       return has("kmg") || has("kommanditgesellschaft");
+    case "klg":       return has("klg") || has("kollektivgesellschaft");
+    case "gbr":       return has("gbr") || has("bürgerlichen rechts");
+    case "se":        return word("se") || has("societas europaea");
+    case "flexco":    return has("flexco") || has("flexible kapital");
+    case "genossenschaft": return has("genossenschaft") || word("eg") || word("gen");
+    case "stiftung":  return has("stiftung");
+    case "partgmbb":  return has("mbb");
+    case "partg":     return has("partg") || has("partnerschaftsgesellschaft");
+    case "ev":        return has("e v") || has("eingetragener verein");
+    case "verein":    return has("verein");
+    default:          return false;
   }
 }
 

@@ -19,6 +19,9 @@ export interface GeminiExtractionResult {
   phone: string | null;
   industry: string | null;
   legal_form: string | null;
+  employee_count: number | null;
+  revenue: string | null;
+  summary: string | null;
   street: string | null;
   city: string | null;
   postal_code: string | null;
@@ -134,7 +137,7 @@ export interface ExtractionStats {
  */
 export async function extractWithGemini(
   input: GeminiInput,
-  opts: { useGrounding?: boolean; stats?: ExtractionStats } = {},
+  opts: { useGrounding?: boolean; needSize?: boolean; stats?: ExtractionStats } = {},
 ): Promise<GeminiExtractionResult | null> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -143,6 +146,9 @@ export async function extractWithGemini(
   }
 
   const useGrounding = opts.useGrounding ?? false;
+  // needSize: Größen-Filter aktiv → Grounding auch wenn schon ein CEO da ist (für echte
+  // Mitarbeiter/Umsatz-Zahlen statt Stage-1-Schätzung).
+  const needSize = opts.needSize ?? false;
   const stats = opts.stats;
   const genAI = new GoogleGenerativeAI(apiKey);
   const prompt = buildPrompt(input);
@@ -158,15 +164,13 @@ export async function extractWithGemini(
       result.ceo_source = result.ceo_first_name || result.ceo_last_name ? "website" : null;
     }
     const ceoName = buildCeoName({ ...result }); // Test ob CEO-Name valide
-    if (ceoName) {
-      console.info(`[Gemini] Stage 1 (ohne Grounding): CEO "${ceoName}" gefunden`);
+    // Stage 2 (Grounding) läuft, wenn erlaubt UND (kein CEO ODER Größen-Daten gebraucht).
+    const stage2Wanted = useGrounding && (!ceoName || needSize);
+    if (!stage2Wanted) {
+      if (ceoName) console.info(`[Gemini] Stage 1 (ohne Grounding): CEO "${ceoName}" gefunden`);
       return result;
     }
-    // Stage 1 hat Daten aber keinen CEO → Stage 2 nur wenn explizit gewünscht
-    if (!useGrounding) {
-      return result; // ohne Grounding fertig, CEO bleibt leer
-    }
-    console.info(`[Gemini] Stage 1: kein CEO → starte Grounding-Suche...`);
+    console.info(`[Gemini] Stage 2 Grounding (${!ceoName ? "kein CEO" : "Größe/Umsatz"})...`);
     if (stats) stats.stage2Calls++;
     const stage2 = await callGemini(genAI, prompt, true);
     if (stage2) {
@@ -179,6 +183,10 @@ export async function extractWithGemini(
         ceo_last_name: result2.ceo_last_name || result.ceo_last_name,
         ceo_gender: result2.ceo_first_name ? result2.ceo_gender : result.ceo_gender,
         ceo_source: result2.ceo_first_name ? result2.ceo_source : result.ceo_source,
+        // Grounding (Stage 2) liefert bessere Größen-Schätzungen → bevorzugen
+        employee_count: result2.employee_count ?? result.employee_count,
+        revenue: result2.revenue || result.revenue,
+        summary: result2.summary || result.summary,
       };
     }
     return result; // Stage 2 fehlgeschlagen, Stage 1 Daten zurückgeben
@@ -224,6 +232,14 @@ function postProcess(parsed: GeminiExtractionResult): GeminiExtractionResult {
   parsed.phone         = stripEmojis(parsed.phone);
   parsed.industry      = stripEmojis(parsed.industry);
   parsed.legal_form    = stripEmojis(parsed.legal_form);
+  parsed.revenue       = stripEmojis(parsed.revenue);
+  parsed.summary       = stripEmojis(parsed.summary);
+  // employee_count: nur eine sinnvolle positive Zahl behalten, sonst null
+  if (typeof parsed.employee_count !== "number" || !Number.isFinite(parsed.employee_count) || parsed.employee_count <= 0) {
+    parsed.employee_count = null;
+  } else {
+    parsed.employee_count = Math.round(parsed.employee_count);
+  }
   parsed.street        = stripEmojis(parsed.street);
   parsed.city          = stripEmojis(parsed.city);
   parsed.postal_code   = stripEmojis(parsed.postal_code);
@@ -252,6 +268,42 @@ for (const opt of INDUSTRY_OPTIONS) {
   INDUSTRY_LABELS_LOWER.set(opt.label.toLowerCase(), opt.label);
 }
 
+/* Synonyme/Varianten → kanonische Branche (gegen Dubletten wie „Software" vs „Softwareunternehmen"). */
+const INDUSTRY_ALIASES: Record<string, string> = {
+  "software": "Softwareentwicklung",
+  "softwareunternehmen": "Softwareentwicklung",
+  "softwarefirma": "Softwareentwicklung",
+  "softwarehaus": "Softwareentwicklung",
+  "softwarehersteller": "Softwareentwicklung",
+  "saas": "Softwareentwicklung",
+  "it": "IT-Dienstleister",
+  "it-unternehmen": "IT-Dienstleister",
+  "it-firma": "IT-Dienstleister",
+  "it-systemhaus": "IT-Dienstleister",
+  "systemhaus": "IT-Dienstleister",
+  "informationstechnologie": "IT-Dienstleister",
+  "edv": "IT-Dienstleister",
+  "webdesign": "Webagentur",
+  "webentwicklung": "Webagentur",
+  "internetagentur": "Webagentur",
+  "digitalagentur": "Webagentur",
+  "onlineshop": "E-Commerce",
+  "online-shop": "E-Commerce",
+  "onlinehandel": "E-Commerce",
+  "ecommerce": "E-Commerce",
+  "anwalt": "Rechtsanwalt",
+  "anwaltskanzlei": "Rechtsanwalt",
+  "rechtsanwaltskanzlei": "Rechtsanwalt",
+  "kanzlei": "Rechtsanwalt",
+  "steuerberatung": "Steuerberater",
+  "steuerkanzlei": "Steuerberater",
+  "steuerberatungskanzlei": "Steuerberater",
+  "marketingagentur": "Marketingagentur",
+  "werbung": "Werbeagentur",
+  "online-marketing": "Marketingagentur",
+  "onlinemarketing": "Marketingagentur",
+};
+
 function normalizeIndustry(val: string | null | undefined): string | null {
   if (!val) return null;
   const trimmed = val.trim();
@@ -261,6 +313,9 @@ function normalizeIndustry(val: string | null | undefined): string | null {
   // Fallback: alter ASCII-Key (z.B. "Bautraeger" → "Bauträger")
   const byKey = INDUSTRY_VALUE_TO_LABEL.get(trimmed.toLowerCase());
   if (byKey) return byKey;
+  // Synonym/Variante auf kanonische Branche mappen
+  const alias = INDUSTRY_ALIASES[trimmed.toLowerCase()];
+  if (alias) return alias;
   return trimmed;
 }
 
@@ -471,6 +526,10 @@ AUFGABE:
    ${INDUSTRY_LIST}
    Wenn KEINE passt: Sonstige
 
+10. FIRMENGROESSE (nur wenn belegbar, sonst null — NICHT raten):
+    - employee_count: geschaetzte Mitarbeiterzahl als ganze Zahl
+    - revenue: Umsatz-Schaetzung als kurzer Text (z.B. "1-5 Mio EUR")
+
 ANTWORTE NUR MIT VALIDEM JSON (kein Markdown, keine Erklaerungen):
 {
   "ceo_title": "Mag.|Dr.|DI|Ing.|MBA oder null",
@@ -483,6 +542,9 @@ ANTWORTE NUR MIT VALIDEM JSON (kein Markdown, keine Erklaerungen):
   "company_name": "Offizieller Firmenname",
   "industry": "EXAKT eine Branche aus der obigen Liste",
   "legal_form": "GmbH/AG/e.U./etc. oder null",
+  "employee_count": "geschaetzte Mitarbeiterzahl als ganze Zahl oder null",
+  "revenue": "Umsatz-Schaetzung wie '1-5 Mio EUR' oder null",
+  "summary": "1 praegnanter Satz, was die Firma macht (aus dem Website-Inhalt), oder null",
   "street": "Strasse und Hausnummer oder null",
   "city": "Stadt oder null",
   "postal_code": "PLZ oder null",

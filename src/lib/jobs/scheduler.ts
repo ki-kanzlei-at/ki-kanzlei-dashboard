@@ -35,6 +35,10 @@ export interface ScheduledJobParams {
   requireCeo?: boolean;
   requireEmail?: boolean;
   requireWebsite?: boolean;
+  techStack?: string[];
+  websiteKeyword?: string;
+  minEmployees?: number;
+  maxResults?: number;
 }
 
 const MAX_PER_USER_RUNNING_JOBS = parseInt(process.env.MAX_PER_USER_RUNNING_JOBS || "5", 10);
@@ -123,7 +127,7 @@ async function pickNextPendingFromDB(): Promise<ScheduledJobParams | null> {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
     .from("search_jobs")
-    .select("id, user_id, query, location, country, city, company_type, require_ceo, require_email, require_website")
+    .select("id, user_id, query, location, country, city, company_type, require_ceo, require_email, require_website, tech_stack, website_keyword, min_employees, max_results")
     .eq("status", "pending")
     .order("created_at", { ascending: true })
     .limit(50);
@@ -148,6 +152,10 @@ async function pickNextPendingFromDB(): Promise<ScheduledJobParams | null> {
       requireCeo: row.require_ceo ?? false,
       requireEmail: row.require_email ?? false,
       requireWebsite: row.require_website ?? false,
+      techStack: row.tech_stack ? String(row.tech_stack).split(",").map((s) => s.trim()).filter(Boolean) : undefined,
+      websiteKeyword: row.website_keyword ?? undefined,
+      minEmployees: row.min_employees ?? undefined,
+      maxResults: row.max_results ?? undefined,
     };
   }
   return null;
