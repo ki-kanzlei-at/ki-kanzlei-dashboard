@@ -8,10 +8,15 @@ import { test, expect, type Page } from "@playwright/test";
 
 const LEADS = "/dashboard/leads";
 
-async function gotoLeads(page: Page) {
+async function gotoLeads({ page }: { page: Page }) {
   await page.goto(LEADS);
   await expect(
     page.getByRole("button", { name: /Suche starten|Suchen starten|Sucht/ }),
+  ).toBeVisible({ timeout: 25_000 });
+  // Tabelle ODER Empty-State muss geladen sein, bevor Tabellen-Tests interagieren —
+  // auf langsamem Dev-Server lädt /api/leads verzögert (sonst flaky 'tbody tr').
+  await expect(
+    page.locator("tbody tr").first().or(page.getByText(/Noch keine Leads|Keine Ergebnisse/)),
   ).toBeVisible({ timeout: 25_000 });
 }
 
@@ -104,18 +109,32 @@ test.describe("Leads · Toolbar & Filter", () => {
     await expect.poll(() => sawSearch, { timeout: 5000 }).toBe(true);
   });
 
-  for (const f of ["Branche", "Bundesland", "Stadt", "Rechtsform", "Land", "Kriterien"]) {
+  // Bundesland ist absichtlich NICHT dabei: der Toolbar-Bundesland-Filter wird erst
+  // zum Popover, wenn ein Land gewählt ist (sonst Hinweis-Toast). Eigener Test unten.
+  for (const f of ["Branche", "Stadt", "Rechtsform", "Land", "Kriterien"]) {
     test(`Filter-Popover '${f}' öffnet`, async ({ page }) => {
-      // Filter-Trigger sind Buttons in der Toolbar; nimm den letzten mit dem Namen
-      // (Suchform-Labels sind keine Buttons), öffne Popover.
-      await page.getByRole("button", { name: f, exact: true }).last().click();
+      // WICHTIG: .filter-trigger (Toolbar) — NICHT getByRole('button',{name}), denn
+      // 'Branche'/'Rechtsform' sind auch sortierbare Tabellen-Spaltenköpfe (Button).
+      await page.locator("button.filter-trigger", { hasText: f }).first().click();
       // Popover hat ein Command-Searchfeld ODER Optionsliste
       await expect(
         page.getByRole("listbox").or(page.locator('[role="dialog"]')).or(page.getByPlaceholder(/such/i)).first(),
-      ).toBeVisible({ timeout: 4000 });
+      ).toBeVisible({ timeout: 6000 });
       await page.keyboard.press("Escape");
     });
   }
+
+  test("Filter-Popover 'Bundesland' öffnet (nach Land-Auswahl)", async ({ page }) => {
+    // Erst Land im Toolbar-Filter wählen → dann wird Bundesland zum echten Popover.
+    await page.locator("button.filter-trigger", { hasText: "Land" }).first().click();
+    await page.getByRole("option", { name: "Österreich" }).click();
+    await page.keyboard.press("Escape");
+    await page.locator("button.filter-trigger", { hasText: "Bundesland" }).first().click();
+    await expect(
+      page.getByRole("listbox").or(page.getByPlaceholder(/such/i)).first(),
+    ).toBeVisible({ timeout: 6000 });
+    await page.keyboard.press("Escape");
+  });
 
   test("Spalten-Toggle öffnet Menü", async ({ page }) => {
     await page.getByRole("button", { name: /Spalten/i }).click();
@@ -144,11 +163,11 @@ test.describe("Leads · Tabelle Sort & Pagination", () => {
     await expect.poll(() => sawLimit, { timeout: 5000 }).toBe(true);
   });
 
-  test("Pagination Next feuert page=", async ({ page }) => {
+  test("Pagination Seite 2 feuert page=2", async ({ page }) => {
     let sawPage = false;
     page.on("request", (r) => { if (/\/api\/leads\?.*page=2/.test(r.url())) sawPage = true; });
-    const next = page.getByRole("button", { name: /Next|Weiter|Nächste/i }).or(page.getByRole("link", { name: /Next|Weiter/i }));
-    await next.first().click();
+    // Bei 9k+ Leads gibt es nummerierte Seiten-Links — Link "2" ist eindeutig.
+    await page.getByRole("link", { name: "2", exact: true }).first().click();
     await expect.poll(() => sawPage, { timeout: 5000 }).toBe(true);
   });
 });
@@ -177,10 +196,17 @@ test.describe("Leads · Selection & Dialoge", () => {
   });
 
   test("Zeile öffnen → Edit-Sheet", async ({ page }) => {
-    // erste Datenzeile (row mit checkbox 'auswählen')
-    const firstRow = page.getByRole("row").filter({ has: page.getByRole("checkbox", { name: /auswählen/i }) }).first();
-    await firstRow.click();
-    await expect(page.getByText(/Details|Übersicht|Aktivität/).first()).toBeVisible({ timeout: 6000 });
+    // erste Datenzeile (row mit checkbox 'auswählen'); auf den Firmennamen (<p>) klicken,
+    // NICHT auf die Zeilenmitte — dort liegen Website/Mail-Links, die wegnavigieren würden.
+    // tbody-Zeile = echte Datenzeile (thead-Headerzeile hat 'Alle auswählen' + columnheader-Rollen).
+    const firstRow = page.locator("tbody tr").first();
+    await expect(firstRow).toBeVisible();
+    // Branche-Zelle (Index 2: select=0, Firma=1, Branche=2) ist reiner Text ohne Links →
+    // Klick bubblet zuverlässig zum Row-onClick, ohne wegzunavigieren.
+    await firstRow.getByRole("cell").nth(2).click();
+    // Edit-Sheet hat die Tabs Übersicht / Bearbeiten / Aktivität
+    await expect(page.getByRole("tab", { name: "Übersicht" })).toBeVisible({ timeout: 6000 });
+    await expect(page.getByRole("tab", { name: "Bearbeiten" })).toBeVisible();
     await page.keyboard.press("Escape");
   });
 });

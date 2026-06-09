@@ -11,7 +11,10 @@ export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,        // wir wollen Test-Reihenfolge stabil (Suchaufträge bauen aufeinander auf)
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  // Live-Server-E2E gegen `next dev`: vereinzelte Timing-Flakes (Popover-/Tabellen-
+  // Render unter Last). 1 lokaler Retry glättet das; CI nutzt 2. In Produktion
+  // (next build/start) entfällt die Dev-Server-Latenz weitgehend.
+  retries: process.env.CI ? 2 : 1,
   workers: 1,                  // ein Worker — sequentielle Ausführung wie ein menschlicher Tester
   reporter: [["list"], ["html", { open: "never" }]],
 

@@ -91,7 +91,7 @@ test.describe("Leads-Tabelle: Volltextsuche", () => {
     await gotoLeadsPage(page);
     await page.getByRole("tab", { name: /^Alle Leads/ }).click();
 
-    const searchInput = page.getByPlaceholder(/suche|search/i).first();
+    const searchInput = page.getByPlaceholder(/Firma, Kontakt, E-Mail/i).first();
     await searchInput.fill("Müller");
 
     // Wait für debounced search (500ms) — Url sollte search= enthalten
