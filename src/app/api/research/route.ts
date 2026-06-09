@@ -11,6 +11,7 @@ import { getBalance, consumeCredits, grantCredits } from "@/lib/credits";
 import { CREDIT_COSTS } from "@/lib/billing/plans";
 import { researchCompany, researchAudience, resolveGeminiKey, type ResearchInput } from "@/lib/research/engine";
 import { createSession, getSessions, addMessage } from "@/lib/supabase/research";
+import { saveSessionToLead } from "@/lib/research/persist-lead";
 import { normalizeDomain, companyFromDomain } from "@/lib/research/format";
 import type { ResearchMethod } from "@/types/research";
 import type { Lead } from "@/types/leads";
@@ -224,8 +225,24 @@ export async function POST(request: NextRequest) {
       });
       const aiMsg = await addMessage(user.id, session.id, { role: "ai", blocks: result.blocks });
 
+      // Auto-Save: Recherche sofort als Lead ins CRM (kein manueller „Speichern"-Klick nötig).
+      let savedLeadId: string | null = null;
+      try {
+        const saved = await saveSessionToLead(session, user.id);
+        savedLeadId = saved.leadId;
+      } catch (e) {
+        console.error("[API POST /api/research] Auto-Save als Lead fehlgeschlagen", e);
+      }
+
       return NextResponse.json(
-        { data: { session, messages: [aiMsg], remaining: consume.remaining } },
+        {
+          data: {
+            session: { ...session, saved_lead_id: savedLeadId ?? session.saved_lead_id },
+            messages: [aiMsg],
+            remaining: consume.remaining,
+            savedLeadId,
+          },
+        },
         { status: 201 },
       );
     } catch (persistErr) {

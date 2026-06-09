@@ -24,9 +24,8 @@ export interface StartPayload {
 }
 
 const METHODS = [
-  { v: "target" as const, title: "Zielgruppe", desc: "Passende Firmen zu deinen Produkten finden und direkt recherchieren" },
+  { v: "manual" as const, title: "Manuell", desc: "Website der Firma eingeben — am genauesten" },
   { v: "crm" as const, title: "Aus Leads", desc: "Einen bestehenden Lead aus deinem CRM auswählen" },
-  { v: "manual" as const, title: "Manuell", desc: "Eine einzelne Firma selbst eingeben, mit oder ohne Website" },
 ];
 
 const COUNTRIES = [
@@ -42,7 +41,7 @@ export function NewResearchModal({
   onClose: () => void;
   onStart: (p: StartPayload) => void;
 }) {
-  const [method, setMethod] = useState<"target" | "crm" | "manual">("target");
+  const [method, setMethod] = useState<"target" | "crm" | "manual">("manual");
 
   // Zielgruppe
   const [zgBranche, setZgBranche] = useState("");
@@ -136,28 +135,15 @@ export function NewResearchModal({
   }
 
   async function startManual() {
-    if (!mCompany.trim() || mStarting) return;
-    let website = mWebsite.trim() || mDomain || "";
-    // Domain garantiert auflösen, falls die Erkennung beim Tippen noch nicht fertig war
-    // (sonst fehlt das Favicon in der Loading-Karte und der Scrape).
-    if (!website) {
-      setMStarting(true);
-      try {
-        const res = await fetch("/api/research/resolve-domain", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ company: mCompany.trim(), country: "AT" }),
-        });
-        const j = await res.json();
-        website = j?.data?.domain || "";
-      } catch { /* ohne Website weiter */ }
-      setMStarting(false);
+    const website = (mWebsite.trim() || mDomain || "").trim();
+    if (!website || mStarting) return;
+    // Website ist Pflicht → genauestes Ergebnis. Mit Firma „target", sonst „url" (leitet
+    // den Firmennamen aus der Domain ab).
+    if (mCompany.trim()) {
+      onStart({ method: "target", company: mCompany.trim(), website, industry: mBranche.trim() || null });
+    } else {
+      onStart({ method: "url", url: website });
     }
-    onStart({
-      method: "target",
-      company: mCompany.trim(),
-      website: website || null,
-      industry: mBranche.trim() || null,
-    });
   }
 
   return (
@@ -320,23 +306,24 @@ export function NewResearchModal({
           {method === "manual" && (
             <>
               <div className="air-field">
-                <label className="label">Firma</label>
-                <div className="input">
-                  <input
-                    value={mCompany}
-                    onChange={(e) => setMCompany(e.target.value)}
-                    placeholder="Name der Firma"
-                    autoFocus
-                  />
-                </div>
-              </div>
-              <div className="air-field">
-                <label className="label">Website (optional)</label>
+                <label className="label">Website</label>
                 <div className="input">
                   <input
                     value={mWebsite}
                     onChange={(e) => setMWebsite(e.target.value)}
-                    placeholder="Domain, falls bekannt"
+                    placeholder="z. B. firma.at"
+                    autoFocus
+                    onKeyDown={(e) => { if (e.key === "Enter") startManual(); }}
+                  />
+                </div>
+              </div>
+              <div className="air-field">
+                <label className="label">Firma (optional)</label>
+                <div className="input">
+                  <input
+                    value={mCompany}
+                    onChange={(e) => setMCompany(e.target.value)}
+                    placeholder="Name der Firma, falls bekannt"
                   />
                 </div>
               </div>
@@ -351,7 +338,7 @@ export function NewResearchModal({
                   />
                 </div>
               </div>
-              <div className="air-disc-meta">Wir recherchieren die Firma über öffentliche Quellen. Je genauer Firma und Website, desto besser das Ergebnis.</div>
+              <div className="air-disc-meta">Gib die Website der Firma ein — daraus recherchieren wir am genauesten. Firma &amp; Branche sind optional.</div>
             </>
           )}
         </div>
@@ -366,7 +353,7 @@ export function NewResearchModal({
             </button>
           )}
           {method === "manual" && (
-            <button className="btn btn-default btn-sm" onClick={startManual} disabled={!mCompany.trim() || mStarting}>
+            <button className="btn btn-default btn-sm" onClick={startManual} disabled={!mWebsite.trim() || mStarting}>
               {mStarting ? <><Loader2 width={14} height={14} style={{ animation: "air-spin .7s linear infinite" }} /> Domain wird gesucht</> : <>Recherche starten <ArrowRight width={14} height={14} /></>}
             </button>
           )}

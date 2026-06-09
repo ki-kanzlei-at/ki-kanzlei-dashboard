@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
     LayoutDashboard, Users, Send, Share2, Linkedin,
     Settings, ChevronsUpDown,
-    LogOut, BadgeCheck, Bell, Loader2,
+    LogOut, BadgeCheck, Loader2,
     Inbox, MessageCircle, BookOpen, ExternalLink,
 } from "lucide-react";
 
@@ -239,7 +239,7 @@ export function AppSidebar({ user, role = "user" }: AppSidebarProps) {
                                             </SidebarMenuButton>
                                         </SidebarMenuItem>
                                     );
-                                })}
+                            })}
                         </SidebarMenu>
                     </SidebarGroupContent>
                 </SidebarGroup>
@@ -321,9 +321,11 @@ export function AppSidebar({ user, role = "user" }: AppSidebarProps) {
                                             Mein Profil
                                         </Link>
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem className="mx-1.5 gap-3 cursor-pointer">
-                                        <Bell className="h-4 w-4 text-muted-foreground" />
-                                        Benachrichtigungen
+                                    <DropdownMenuItem asChild className="mx-1.5 gap-3 cursor-pointer">
+                                        <Link href="/dashboard/settings">
+                                            <Settings className="h-4 w-4 text-muted-foreground" />
+                                            Einstellungen
+                                        </Link>
                                     </DropdownMenuItem>
                                 </DropdownMenuGroup>
 

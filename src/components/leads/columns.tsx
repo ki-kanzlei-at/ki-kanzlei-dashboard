@@ -355,6 +355,22 @@ export function createColumns(actions: ColumnActions): ColumnDef<Lead>[] {
       size: 130,
     },
 
+    /* Hinzugefügt (Datum, sortierbar) */
+    {
+      accessorKey: "created_at",
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Hinzugefügt" />,
+      cell: ({ getValue }) => {
+        const v = getValue() as string | null;
+        if (!v) return <span className="text-xs text-muted-foreground/50">—</span>;
+        return (
+          <span className="text-xs text-muted-foreground whitespace-nowrap">
+            {new Date(v).toLocaleDateString("de-AT", { day: "2-digit", month: "short", year: "numeric" })}
+          </span>
+        );
+      },
+      size: 120,
+    },
+
     /* Actions */
     {
       id: "actions",

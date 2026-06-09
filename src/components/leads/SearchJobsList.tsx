@@ -314,7 +314,7 @@ export function SearchJobsList({
               <TableHead className="px-3 text-xs font-medium" style={{ width: 110 }}>Stadt</TableHead>
               <TableHead className="px-3 text-xs font-medium" style={{ width: 100 }}>Land</TableHead>
               <TableHead className="px-3 text-xs font-medium" style={{ width: 100 }}>Rechtsform</TableHead>
-              <TableHead className="px-3 text-xs font-medium" style={{ width: 110 }}>Kriterien</TableHead>
+              <TableHead className="px-3 text-xs font-medium" style={{ width: 170 }}>Kriterien</TableHead>
               <TableHead className="px-3 text-xs font-medium" style={{ width: 120 }}>Status</TableHead>
               <TableHead className="px-3 text-xs font-medium" style={{ width: 200 }}>Fortschritt</TableHead>
               <TableHead className="px-3 text-xs font-medium" style={{ width: 120 }}>Erstellt</TableHead>
@@ -391,9 +391,9 @@ export function SearchJobsList({
                     )}
                   </TableCell>
 
-                  {/* Kriterien — Chips für die gesetzten Filter */}
+                  {/* Kriterien — Chips für die gesetzten Filter (Pflichtfelder + Mitarbeiter + Limit) */}
                   <TableCell className="py-2 px-3">
-                    {(job.require_ceo || job.require_email || job.require_website) ? (
+                    {(job.require_ceo || job.require_email || job.require_website || job.min_employees || job.max_results) ? (
                       <div className="flex items-center gap-1 flex-wrap">
                         {job.require_ceo && (
                           <Tooltip>
@@ -425,6 +425,26 @@ export function SearchJobsList({
                             <TooltipContent>Nur mit Website</TooltipContent>
                           </Tooltip>
                         )}
+                        {job.min_employees ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex items-center h-5 px-1.5 rounded-full bg-muted text-[10.5px] font-medium text-muted-foreground tabular-nums">
+                                ≥{job.min_employees} MA
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>Mindestens {job.min_employees} Mitarbeiter</TooltipContent>
+                          </Tooltip>
+                        ) : null}
+                        {job.max_results ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex items-center h-5 px-1.5 rounded-full bg-muted text-[10.5px] font-medium text-muted-foreground tabular-nums">
+                                max {job.max_results}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>Höchstens {job.max_results} Leads</TooltipContent>
+                          </Tooltip>
+                        ) : null}
                       </div>
                     ) : (
                       <span className="text-xs text-muted-foreground/50">Keine</span>

@@ -106,6 +106,24 @@ export async function POST(
 
     const aiMessage = await addMessage(user.id, id, { role: "ai", blocks });
 
+    // Chat → Lead-Sync: wenn die Antwort eine konkrete Mitarbeiterzahl nennt und die
+    // Recherche mit einem Lead verknüpft ist, den Lead automatisch aktualisieren.
+    try {
+      const linkedLeadId = session.saved_lead_id ?? session.lead_id;
+      if (linkedLeadId) {
+        const answerText = blocksToPlainText(blocks);
+        const m = answerText.match(/(\d[\d.  ]{0,9}\d|\d)\s*(?:mitarbeiter|mitarbeitende|besch[aä]ftigte|angestellte|employees)/i);
+        if (m) {
+          const n = parseInt(m[1].replace(/[^\d]/g, ""), 10);
+          if (Number.isFinite(n) && n > 0) {
+            await supabase.from("leads").update({ employee_count: n }).eq("id", linkedLeadId);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("[chat] Lead-Sync fehlgeschlagen", e);
+    }
+
     return NextResponse.json({ data: { userMessage, aiMessage, remaining } });
   } catch (error) {
     console.error("[API POST /api/research/[id]/chat]", error);

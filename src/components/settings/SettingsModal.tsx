@@ -15,12 +15,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { Switch } from "@/components/ui/switch";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import {
-  Card, CardContent, CardDescription, CardHeader, CardTitle,
-} from "@/components/ui/card";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import EmailAccountsManager from "@/components/settings/EmailAccountsManager";
 import { renderSignatureHtml } from "@/lib/email/signature";
@@ -149,6 +147,49 @@ function RowToggle({ title, desc, checked, onCheckedChange }: { title: string; d
         {desc && <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{desc}</p>}
       </div>
       <Switch checked={checked} onCheckedChange={onCheckedChange} />
+    </div>
+  );
+}
+
+/* ───────────────────────── Skeletons (Ladezustände) ───────────────────────── */
+/* Spiegeln das echte Layout (SettingRow / RowToggle) → kein Layout-Sprung beim Laden. */
+function RowSkeleton({ count = 3 }: { count?: number }) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="grid grid-cols-1 items-center gap-2 border-t py-4 first:border-t-0 sm:grid-cols-[1fr_minmax(0,440px)] sm:gap-8">
+          <div className="min-w-0 space-y-2">
+            <Skeleton className="h-3.5 w-28" />
+            <Skeleton className="h-3 w-52" />
+          </div>
+          <Skeleton className="h-9 w-full" />
+        </div>
+      ))}
+    </>
+  );
+}
+
+function ToggleRowSkeleton({ count = 3 }: { count?: number }) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="flex items-start justify-between gap-6 border-t py-4 first:border-t-0">
+          <div className="min-w-0 space-y-2">
+            <Skeleton className="h-3.5 w-44" />
+            <Skeleton className="h-3 w-60" />
+          </div>
+          <Skeleton className="h-5 w-9 shrink-0 rounded-full" />
+        </div>
+      ))}
+    </>
+  );
+}
+
+function TextareaFieldSkeleton({ h = "h-20" }: { h?: string }) {
+  return (
+    <div className="space-y-2">
+      <Skeleton className="h-3.5 w-40" />
+      <Skeleton className={cn("w-full", h)} />
     </div>
   );
 }
@@ -349,6 +390,16 @@ function ProfileSection() {
       <PageHead title="Mein Profil" sub="Deine persönlichen Daten, Login-Methoden und Darstellung." />
 
       <SectionCard title="Persönliche Informationen" desc="Name, Login-E-Mail und Rolle — der Name erscheint in Sidebar und Begrüßung.">
+        {loading ? (
+          <>
+            <div className="flex items-center gap-4 pb-4">
+              <Skeleton className="size-14 rounded-full" />
+              <Skeleton className="h-8 w-32" />
+            </div>
+            <RowSkeleton count={4} />
+          </>
+        ) : (
+        <>
         <div className="flex items-center gap-4 pb-4">
           {avatarUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -391,6 +442,8 @@ function ProfileSection() {
             {role === "admin" ? "Administrator" : role === "user" ? "Benutzer" : "—"}
           </span>
         </SettingRow>
+        </>
+        )}
       </SectionCard>
 
       <SectionCard title="Sicherheit" desc="Login-Methoden, Passwort und Zwei-Faktor-Authentifizierung.">
@@ -707,6 +760,8 @@ function OfferingSection() {
       <PageHead title="Angebot & Positionierung" sub="Beschreibe dein Unternehmen und Angebot — die Basis, mit der die KI jeden Outreach personalisiert." />
 
       <SectionCard title="Unternehmen" desc="Name, Website und Slogan deines Unternehmens.">
+        {loading ? <RowSkeleton count={3} /> : (
+        <>
         <SettingRow title="Firmenname" desc="Erscheint in Mails & PDFs und als Kampagnen-Variable.">
           <Input value={companyName} onChange={(e) => setCompanyName(e.target.value)} disabled={loading} placeholder="z. B. KI Kanzlei GmbH" />
         </SettingRow>
@@ -716,9 +771,18 @@ function OfferingSection() {
         <SettingRow title="Slogan / Tagline" desc="Kurzer Claim — optional im Outreach nutzbar.">
           <Input value={tagline} onChange={(e) => setTagline(e.target.value)} disabled={loading} placeholder="z. B. KI für Kanzleien" />
         </SettingRow>
+        </>
+        )}
       </SectionCard>
 
       <SectionCard title="Dein Angebot" desc="Je konkreter, desto treffsicherer die KI-Empfehlungen — genutzt vom AI Researcher und für LinkedIn-Kampagnen.">
+        {loading ? (
+          <div className="grid gap-5">
+            <TextareaFieldSkeleton h="h-24" />
+            <TextareaFieldSkeleton h="h-16" />
+            <TextareaFieldSkeleton h="h-9" />
+          </div>
+        ) : (
         <div className="grid gap-5">
           <div className="grid gap-2">
             <Label htmlFor="off-products">Produkte &amp; Dienstleistungen</Label>
@@ -755,6 +819,7 @@ function OfferingSection() {
             />
           </div>
         </div>
+        )}
       </SectionCard>
 
       <div className="flex justify-end">
@@ -839,6 +904,16 @@ function MailboxSendingSettings() {
   return (
     <>
       <SectionCard title="Versand-Schutz & Standards" desc="Globale Sicherheits-Obergrenze und Signatur. Abmeldelink (DSGVO-Pflicht) und Bounce-Schutz laufen automatisch im Hintergrund; Versandfenster, Tempo und Tracking stellst du pro Kampagne ein.">
+      {loading ? (
+        <>
+          <RowSkeleton count={1} />
+          <div className="grid gap-2 border-t pt-4">
+            <Skeleton className="h-3.5 w-20" />
+            <Skeleton className="h-28 w-full" />
+          </div>
+        </>
+      ) : (
+      <>
       <SettingRow title="Tages-Gesamtlimit" desc="Obergrenze über alle aktiven Postfächer zusammen. 0 = aus (nur die Limits je Postfach gelten).">
         <div className="flex items-center gap-2">
           <Input type="number" min={0} max={5000} step={10} value={totalDailyLimit} disabled={loading}
@@ -857,6 +932,8 @@ function MailboxSendingSettings() {
         />
         <p className="text-[11px] text-muted-foreground">Wird unter jede Kampagnen- und Test-Mail gesetzt. Fett, Kursiv, Listen &amp; Links werden im Versand übernommen.</p>
       </div>
+      </>
+      )}
       </SectionCard>
 
       <div className="flex justify-end">
@@ -973,6 +1050,8 @@ function SocialSection() {
       <PageHead title="LinkedIn" sub="Verbinde dein LinkedIn-Konto – Einladungen, Follow-ups und Antworten laufen danach automatisch." />
 
       <SectionCard title="LinkedIn-Verbindung" desc="API-Key und Konto deiner ConnectSafely-Integration.">
+        {loading ? <RowSkeleton count={2} /> : (
+        <>
         <SettingRow title="API-Key" desc="Dein ConnectSafely API-Key für automatisierten Outreach.">
           <div className="flex gap-2">
             <div className="relative flex-1">
@@ -1019,9 +1098,12 @@ function SocialSection() {
             disabled={loading}
           />
         </SettingRow>
+        </>
+        )}
       </SectionCard>
 
       <SectionCard title="Tageslimit" desc="Sobald dein LinkedIn-Konto verbunden ist, laufen Einladungen, Follow-ups und Antworten automatisch. Hier legst du nur die Sicherheits-Obergrenze pro Tag fest.">
+        {loading ? <RowSkeleton count={1} /> : (
         <SettingRow title="Maximale Einladungen pro Tag" desc="Empfohlen: 10–13. LinkedIn drosselt ab ~90 Einladungen/Woche pro Konto.">
           <Input
             id="li-daily-limit"
@@ -1037,6 +1119,7 @@ function SocialSection() {
             }}
           />
         </SettingRow>
+        )}
       </SectionCard>
 
       <div className="flex justify-end">
@@ -1115,6 +1198,8 @@ function LeadsSection() {
       <PageHead title="Leads & Suche" sub="Standard-Filter und Qualitätsregeln für jede neue Lead-Suche." />
 
       <SectionCard title="Such-Defaults" desc="Diese Werte sind bei jeder neuen Suche vorausgewählt.">
+        {loading ? <RowSkeleton count={3} /> : (
+        <>
         <SettingRow title="Standard-Land" desc="Land, das bei neuen Suchen vorausgewählt ist.">
           <Select value={String(values.default_country)} onValueChange={(v) => set("default_country", v)}>
             <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
@@ -1146,9 +1231,18 @@ function LeadsSection() {
             </SelectContent>
           </Select>
         </SettingRow>
+        </>
+        )}
       </SectionCard>
 
       <SectionCard title="Qualitätsregeln" desc="Mindestanforderungen und automatisches Scoring neuer Leads.">
+        {loading ? (
+          <>
+            <ToggleRowSkeleton count={3} />
+            <RowSkeleton count={1} />
+          </>
+        ) : (
+        <>
         <RowToggle title="E-Mail-Adresse erforderlich" desc="Leads ohne E-Mail werden verworfen." checked={!!values.require_email} onCheckedChange={(v) => set("require_email", v)} />
         <RowToggle title="Geschäftsführer:in erforderlich" desc="Nur Leads mit bekannter Geschäftsführung speichern." checked={!!values.require_ceo} onCheckedChange={(v) => set("require_ceo", v)} />
         <RowToggle title="Automatisches Lead-Scoring" desc="Neue Leads werden automatisch bewertet." checked={!!values.auto_score} onCheckedChange={(v) => set("auto_score", v)} />
@@ -1156,6 +1250,8 @@ function LeadsSection() {
           <Input type="number" min={0} max={100} value={Number(values.score_threshold)} disabled={loading}
             onChange={(e) => set("score_threshold", Math.max(0, Math.min(100, Number(e.target.value) || 0)))} />
         </SettingRow>
+        </>
+        )}
       </SectionCard>
 
       <div className="flex justify-end">
@@ -1190,7 +1286,7 @@ function IntegrationCard({ p, connected, loading, onConnect, onManage }: {
           {p.kind === "crm"
             ? (connected
                 ? <span className="inline-flex items-center gap-1 font-medium text-emerald-600"><Check className="size-3" /> Verbunden</span>
-                : <span className="text-muted-foreground">Nicht verbunden · OAuth</span>)
+                : <span className="text-muted-foreground">Nicht verbunden</span>)
             : <span className="text-muted-foreground">Automatisierung</span>}
         </span>
       </div>
@@ -1267,14 +1363,26 @@ function CrmSection() {
 
   return (
     <>
-      <PageHead title="Integrationen" sub="CRM mit einem Klick verbinden — die Autorisierung läuft über OAuth beim Anbieter, ganz ohne Token." />
+      <PageHead title="Integrationen" sub="Verbinde dein CRM mit einem Klick. Du meldest dich sicher direkt beim Anbieter an — ein Passwort musst du bei uns nicht hinterlegen." />
 
-      <SectionCard title="CRM" desc="Mit einem Klick verbinden — die Autorisierung läuft über OAuth beim Anbieter.">
+      <SectionCard title="CRM" desc="Mit einem Klick verbinden — die Anmeldung läuft sicher direkt beim Anbieter.">
         <div className="grid gap-3 pt-1 sm:grid-cols-2">
-          {crm.map((p) => (
-            <IntegrationCard key={p.id} p={p} connected={!!connected[p.id]} loading={loading}
-              onConnect={() => connect(p)} onManage={() => setManageId(p.id)} />
-          ))}
+          {loading
+            ? Array.from({ length: crm.length || 4 }).map((_, i) => (
+                <div key={i} className="flex flex-col rounded-[10px] border bg-card p-4 shadow-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <Skeleton className="h-5 w-28" />
+                    <Skeleton className="h-3 w-20" />
+                  </div>
+                  <Skeleton className="mt-3 h-3 w-full" />
+                  <Skeleton className="mt-1.5 h-3 w-2/3" />
+                  <Skeleton className="mt-3 h-8 w-full" />
+                </div>
+              ))
+            : crm.map((p) => (
+                <IntegrationCard key={p.id} p={p} connected={!!connected[p.id]} loading={loading}
+                  onConnect={() => connect(p)} onManage={() => setManageId(p.id)} />
+              ))}
         </div>
       </SectionCard>
 
@@ -1306,9 +1414,8 @@ function CrmSection() {
 function BillingSection() {
   return (
     <>
-      <PageHead title="Abrechnung & Credits" sub="Aktueller Plan, Credit-Verbrauch und Top-Ups." />
-      <BillingPlanCard />
-      <BillingCreditsCard />
+      <PageHead title="Abrechnung & Credits" sub="Dein Plan, die Credits für diesen Monat und dein Verbrauch." />
+      <BillingOverview />
       <BillingTopUpsCard />
       <BillingLedgerCard />
     </>
@@ -1340,7 +1447,19 @@ function useBilling() {
   return { data, loading };
 }
 
-function BillingPlanCard() {
+function statusPill(status?: string): { label: string; cls: string } {
+  switch (status) {
+    case "active":            return { label: "Aktiv",              cls: "bg-emerald-50 text-emerald-700" };
+    case "trialing":          return { label: "Testphase",          cls: "bg-blue-50 text-blue-700" };
+    case "past_due":          return { label: "Zahlung überfällig",  cls: "bg-amber-50 text-amber-700" };
+    case "canceled":          return { label: "Gekündigt",          cls: "bg-rose-50 text-rose-700" };
+    case "pending_checkout":  return { label: "Checkout offen",     cls: "bg-muted text-muted-foreground" };
+    default:                  return { label: status ?? "Inaktiv",  cls: "bg-muted text-muted-foreground" };
+  }
+}
+
+/* Plan + Credits in einer ruhigen Übersicht (ein Fetch). */
+function BillingOverview() {
   const { data, loading } = useBilling();
   const [portalLoading, setPortalLoading] = useState(false);
 
@@ -1357,95 +1476,85 @@ function BillingPlanCard() {
   }
 
   const sub = data?.subscription;
-  const planLabel = sub ? sub.plan.toUpperCase() : "—";
+  const planLabel = sub ? sub.plan.charAt(0).toUpperCase() + sub.plan.slice(1) : "Kein Abo";
   const renews = sub?.current_period_end
     ? new Date(sub.current_period_end).toLocaleDateString("de-DE", { year: "numeric", month: "long", day: "numeric" })
-    : "—";
-  const statusBadge = sub?.status === "active" ? "Aktiv"
-    : sub?.status === "trialing" ? "Trial"
-    : sub?.status === "past_due" ? "Zahlung überfällig"
-    : sub?.status === "canceled" ? "Gekündigt"
-    : sub?.status === "pending_checkout" ? "Checkout offen"
-    : sub?.status ?? "—";
+    : null;
+  const pill = statusPill(sub?.status);
+
+  const balance = data?.balance ?? 0;
+  const cap = sub?.monthly_credits ?? 0;
+  const pct = cap > 0 ? Math.min(100, (balance / cap) * 100) : 0;
+  const low = cap > 0 && pct <= 15;
 
   return (
-    <Card className="mb-4 shadow-xs border-primary/20 bg-gradient-to-br from-primary/5 to-card">
-      <CardContent className="p-6">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-primary mb-1.5">
-              Aktueller Plan
-            </p>
-            <p className="text-3xl font-semibold tracking-tight">
-              {loading ? "…" : planLabel}
-            </p>
-            <p className="text-sm text-muted-foreground mt-1">
-              Status: <b className="text-foreground font-semibold">{statusBadge}</b>
-              {sub && ` · ${sub.cancel_at_period_end ? "läuft aus" : "verlängert"} am ${renews}`}
-            </p>
+    <SectionCard title="Plan & Credits" desc="Dein Abo und die Credits für diesen Monat.">
+      {loading ? (
+        <div className="grid gap-5 sm:grid-cols-2">
+          <div className="space-y-2.5">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-6 w-28" />
+            <Skeleton className="h-3.5 w-44" />
+            <Skeleton className="h-8 w-32" />
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={openPortal} disabled={portalLoading || !sub}>
-              {portalLoading ? "Wird geöffnet …" : "Subscription verwalten"}
+          <div className="space-y-2.5 border-t pt-5 sm:border-l sm:border-t-0 sm:pl-6 sm:pt-0">
+            <Skeleton className="h-3 w-28" />
+            <Skeleton className="h-6 w-36" />
+            <Skeleton className="h-1.5 w-full" />
+            <Skeleton className="h-3.5 w-40" />
+          </div>
+        </div>
+      ) : (
+        <div className="grid gap-5 sm:grid-cols-2">
+          {/* Plan */}
+          <div>
+            <p className="text-xs text-muted-foreground">Aktuelles Abo</p>
+            <div className="mt-1 flex items-center gap-2">
+              <p className="text-xl font-medium tracking-tight">{planLabel}</p>
+              <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium", pill.cls)}>
+                {pill.label}
+              </span>
+            </div>
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              {sub && renews
+                ? `${sub.cancel_at_period_end ? "Läuft aus am" : "Verlängert sich am"} ${renews}`
+                : "Noch kein aktives Abo."}
+            </p>
+            <Button variant="outline" size="sm" className="mt-3" onClick={openPortal} disabled={portalLoading || !sub}>
+              {portalLoading ? "Wird geöffnet…" : "Abo verwalten"}
             </Button>
           </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
 
-function BillingCreditsCard() {
-  const { data, loading } = useBilling();
-  const balance = data?.balance ?? 0;
-  const cap = data?.subscription?.monthly_credits ?? 0;
-  const pct = cap > 0 ? Math.min(100, (balance / cap) * 100) : 0;
-
-  return (
-    <Card className="mb-4 shadow-xs">
-      <CardHeader><CardTitle>Credits</CardTitle></CardHeader>
-      <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div className="rounded-lg border p-4">
-          <p className="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground mb-2">
-            Verfügbar
-          </p>
-          <p className="text-2xl font-semibold tracking-tight tabular-nums">
-            {loading ? "…" : balance.toLocaleString("de-DE")}
-          </p>
-          {cap > 0 && (
-            <Progress value={pct} className="h-1.5 mt-3" />
-          )}
+          {/* Credits */}
+          <div className="border-t pt-5 sm:border-l sm:border-t-0 sm:pl-6 sm:pt-0">
+            <p className="text-xs text-muted-foreground">Credits diesen Monat</p>
+            <p className="mt-1 text-xl font-medium tracking-tight tabular-nums">
+              {balance.toLocaleString("de-DE")}
+              {cap > 0 && <span className="ml-1.5 text-sm font-normal text-muted-foreground">von {cap.toLocaleString("de-DE")}</span>}
+            </p>
+            {cap > 0 && (
+              <Progress value={pct} className={cn("mt-2.5 h-1.5", low && "[&>div]:bg-amber-500")} />
+            )}
+            <p className={cn("mt-2 text-[13px]", low ? "text-amber-600" : "text-muted-foreground")}>
+              {cap === 0
+                ? "Gekaufte Credits verfallen nie."
+                : low
+                  ? "Wenig übrig. Jetzt aufstocken, damit nichts stoppt."
+                  : renews ? `Frischt sich am ${renews} wieder auf.` : "Frischt sich bei der nächsten Verlängerung auf."}
+            </p>
+          </div>
         </div>
-        <div className="rounded-lg border p-4">
-          <p className="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground mb-2">
-            Pro Monat (Plan)
-          </p>
-          <p className="text-2xl font-semibold tracking-tight tabular-nums">
-            {loading ? "…" : cap.toLocaleString("de-DE")}
-          </p>
-          <p className="text-[11.5px] text-muted-foreground mt-1.5">
-            Wird beim nächsten Renewal aufgefrischt
-          </p>
-        </div>
-        <div className="rounded-lg border border-dashed p-4 flex flex-col items-start justify-center">
-          <p className="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground mb-2">
-            Credits aufstocken
-          </p>
-          <p className="text-[12px] text-muted-foreground mb-2">
-            Top-Up-Packs verfallen nicht.
-          </p>
-        </div>
-      </CardContent>
-    </Card>
+      )}
+    </SectionCard>
   );
 }
 
 function BillingTopUpsCard() {
   const [loading, setLoading] = useState<string | null>(null);
-  const packs: { key: "small" | "medium" | "large"; name: string; credits: number; price: string }[] = [
-    { key: "small",  name: "Small",  credits:  1000, price: "€ 149"   },
-    { key: "medium", name: "Medium", credits:  5000, price: "€ 599"   },
-    { key: "large",  name: "Large",  credits: 15000, price: "€ 1.499" },
+  const packs: { key: "small" | "medium" | "large"; credits: number; price: string }[] = [
+    { key: "small",  credits:  1000, price: "149 €"   },
+    { key: "medium", credits:  5000, price: "599 €"   },
+    { key: "large",  credits: 15000, price: "1.499 €" },
   ];
 
   async function buy(pack: "small" | "medium" | "large") {
@@ -1465,31 +1574,27 @@ function BillingTopUpsCard() {
   }
 
   return (
-    <Card className="mb-4 shadow-xs">
-      <CardHeader>
-        <CardTitle>Credit-Packs (Top-Up)</CardTitle>
-        <CardDescription>Einmaliger Kauf · verfallen nicht · jederzeit nachkaufen</CardDescription>
-      </CardHeader>
-      <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <SectionCard title="Credits aufstocken" desc="Einmalig kaufen, verfallen nie, sofort verfügbar.">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {packs.map((p) => (
-          <div key={p.key} className="rounded-lg border p-4">
-            <p className="text-sm font-semibold">{p.name}</p>
-            <p className="text-[18px] font-bold tracking-tight mt-1">{p.price}</p>
-            <p className="text-[12px] text-muted-foreground mb-3">
+          <div key={p.key} className="rounded-lg border p-4 transition-colors hover:border-foreground/20">
+            <p className="text-[13px] text-muted-foreground tabular-nums">
               {p.credits.toLocaleString("de-DE")} Credits
             </p>
+            <p className="mt-1 text-lg font-medium tracking-tight tabular-nums">{p.price}</p>
             <Button
+              variant="outline"
               size="sm"
-              className="w-full"
+              className="mt-3 w-full"
               onClick={() => buy(p.key)}
               disabled={loading !== null}
             >
-              {loading === p.key ? "Wird vorbereitet …" : "Kaufen"}
+              {loading === p.key ? "Wird vorbereitet…" : "Kaufen"}
             </Button>
           </div>
         ))}
-      </CardContent>
-    </Card>
+      </div>
+    </SectionCard>
   );
 }
 
@@ -1501,60 +1606,134 @@ interface LedgerRow {
   created_at: string;
 }
 
+const LEDGER_LABELS: Record<string, string> = {
+  plan_grant:      "Plan-Credits gutgeschrieben",
+  topup:           "Credits gekauft",
+  lead_discover:   "Lead gefunden",
+  lead_enrich:     "Lead angereichert",
+  lead_research:   "KI-Recherche",
+  lead_chat:       "KI-Frage",
+  mail_generate:   "Mail generiert",
+  mail_send:       "Mail versendet",
+  linkedin_action: "LinkedIn-Aktion",
+  seo_post:        "SEO-Post",
+  seo_post_image:  "SEO-Post mit Bild",
+  social_post:     "Social-Media-Post",
+  refund:          "Rückerstattung",
+  admin_adjust:    "Manuelle Anpassung",
+};
+
+/* Tages-Überschrift: „Heute“ / „Gestern“ / Datum. */
+function dayLabel(d: Date): string {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const that = new Date(d);  that.setHours(0, 0, 0, 0);
+  const diff = Math.round((today.getTime() - that.getTime()) / 86_400_000);
+  if (diff === 0) return "Heute";
+  if (diff === 1) return "Gestern";
+  return d.toLocaleDateString("de-DE", {
+    day: "numeric", month: "long",
+    year: today.getFullYear() === d.getFullYear() ? undefined : "numeric",
+  });
+}
+
 function BillingLedgerCard() {
   const [rows, setRows] = useState<LedgerRow[]>([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/credits/ledger?limit=20", { cache: "no-store" });
-        if (res.ok) {
-          const json = await res.json();
-          setRows(json.data ?? []);
-        }
-      } finally { setLoading(false); }
-    })();
+  const fetchPage = useCallback(async (p: number) => {
+    const res = await fetch(`/api/credits/ledger?limit=30&page=${p}`, { cache: "no-store" });
+    if (!res.ok) return;
+    const json = await res.json();
+    setTotalPages(json.totalPages ?? 1);
+    setRows((prev) => (p === 1 ? (json.data ?? []) : [...prev, ...(json.data ?? [])]));
   }, []);
 
-  const labelFor = (a: string): string => ({
-    plan_grant:      "Plan-Credits gutgeschrieben",
-    topup:           "Top-Up-Kauf",
-    lead_discover:   "Lead-Discovery",
-    lead_enrich:     "Lead-Enrichment",
-    mail_generate:   "KI-Mail generiert",
-    mail_send:       "Mail versendet",
-    linkedin_action: "LinkedIn-Aktion",
-    seo_post:        "SEO-Post",
-    social_post:     "Social-Media-Post",
-    refund:          "Refund",
-    admin_adjust:    "Admin-Anpassung",
-  }[a] ?? a);
+  useEffect(() => { fetchPage(1).finally(() => setLoading(false)); }, [fetchPage]);
+
+  async function loadMore() {
+    const next = page + 1;
+    setLoadingMore(true);
+    try { await fetchPage(next); setPage(next); }
+    finally { setLoadingMore(false); }
+  }
+
+  // Nach Tagen gruppieren (Reihenfolge bleibt: neueste zuerst).
+  const groups = useMemo(() => {
+    const out: { label: string; rows: LedgerRow[] }[] = [];
+    for (const r of rows) {
+      const label = dayLabel(new Date(r.created_at));
+      const last = out[out.length - 1];
+      if (last && last.label === label) last.rows.push(r);
+      else out.push({ label, rows: [r] });
+    }
+    return out;
+  }, [rows]);
 
   return (
-    <Card className="mb-4 shadow-xs">
-      <CardHeader><CardTitle>Verbrauchs-Verlauf</CardTitle></CardHeader>
-      <CardContent className="p-0">
-        {loading ? (
-          <div className="px-5 py-6 text-center text-[13px] text-muted-foreground">Wird geladen …</div>
-        ) : rows.length === 0 ? (
-          <div className="px-5 py-6 text-center text-[13px] text-muted-foreground">Noch keine Aktionen</div>
-        ) : rows.map((r, i) => (
-          <div key={r.id} className={cn("grid grid-cols-[1fr_120px_100px] items-center gap-3 px-5 py-2.5", i > 0 && "border-t")}>
-            <span className="text-[13px]">{labelFor(r.action_type)}</span>
-            <span className="text-[11.5px] text-muted-foreground">
-              {new Date(r.created_at).toLocaleString("de-DE", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
-            </span>
-            <span className={cn(
-              "text-right text-[13px] font-semibold tabular-nums",
-              r.delta > 0 ? "text-emerald-600" : "text-muted-foreground",
-            )}>
-              {r.delta > 0 ? `+${r.delta.toLocaleString("de-DE")}` : r.delta.toLocaleString("de-DE")}
-            </span>
-          </div>
-        ))}
-      </CardContent>
-    </Card>
+    <SectionCard title="Verbrauch" desc="Jede Aktion mit Datum und den verbrauchten Credits." bodyClassName="p-0">
+      {loading ? (
+        <div>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="flex items-center justify-between gap-4 border-b px-5 py-2.5 last:border-b-0">
+              <div className="space-y-1.5">
+                <Skeleton className="h-3.5 w-40" />
+                <Skeleton className="h-3 w-16" />
+              </div>
+              <div className="space-y-1.5 text-right">
+                <Skeleton className="ml-auto h-3.5 w-20" />
+                <Skeleton className="ml-auto h-3 w-14" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="px-5 py-10 text-center">
+          <p className="text-sm">Noch keine Aktionen</p>
+          <p className="mt-1 text-xs text-muted-foreground">Sobald du Leads suchst oder Mails verschickst, erscheint hier dein Verbrauch.</p>
+        </div>
+      ) : (
+        <>
+          {groups.map((g) => (
+            <div key={g.label}>
+              <div className="border-b bg-muted/30 px-5 py-1.5 text-xs font-medium text-muted-foreground">
+                {g.label}
+              </div>
+              {g.rows.map((r) => {
+                const label = LEDGER_LABELS[r.action_type] ?? r.action_type;
+                const credit = r.delta > 0;
+                const time = new Date(r.created_at).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+                return (
+                  <div key={r.id} className="flex items-center justify-between gap-4 border-b px-5 py-2.5 last:border-b-0">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm">{label}</p>
+                      <p className="text-xs text-muted-foreground tabular-nums">{time} Uhr</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className={cn("text-sm font-medium tabular-nums", credit ? "text-emerald-600" : "text-foreground")}>
+                        {credit ? "+" : ""}{r.delta.toLocaleString("de-DE")} Credits
+                      </p>
+                      <p className="text-xs text-muted-foreground tabular-nums">
+                        Stand {r.balance_after.toLocaleString("de-DE")}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+          {page < totalPages && (
+            <div className="flex justify-center p-3">
+              <Button variant="ghost" size="sm" onClick={loadMore} disabled={loadingMore}>
+                {loadingMore ? "Lädt…" : "Mehr anzeigen"}
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+    </SectionCard>
   );
 }
 

@@ -496,7 +496,7 @@ export async function getDistinctLegalForms(country?: string): Promise<string[]>
 export async function getDistinctCities(country?: string): Promise<string[]> {
   const supabase = await createClient();
 
-  let query = supabase.from("leads").select("city");
+  let query = supabase.from("leads").select("city").limit(10000);
   if (country) query = query.eq("country", country);
 
   const { data, error } = await query;

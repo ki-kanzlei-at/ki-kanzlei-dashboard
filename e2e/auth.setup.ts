@@ -28,10 +28,10 @@ setup("authenticate", async ({ page }) => {
 
   await page.goto("/login");
 
-  // Selektoren über Role/Placeholder (shadcn FormLabel bindet nicht via htmlFor)
-  await page.getByRole("textbox", { name: "E-Mail Adresse" }).fill(email);
-  await page.getByPlaceholder("Dein Passwort").fill(password);
-  await page.getByRole("button", { name: "Zum Dashboard" }).click();
+  // Selektoren über Placeholder (shadcn FormLabel bindet nicht via htmlFor)
+  await page.getByPlaceholder("name@firma.at").fill(email);
+  await page.locator('input[type="password"]').first().fill(password);
+  await page.getByRole("button", { name: /Anmelden/ }).click();
 
   // Warten bis auf /dashboard weitergeleitet
   await page.waitForURL(/\/dashboard/, { timeout: 20_000 });

@@ -4,15 +4,19 @@ import { useEffect, useRef, useState, useCallback, type ChangeEvent } from "reac
 import { toast } from "sonner";
 import {
   Plus, Search, Send, Paperclip, ExternalLink, Check, X, Trash2, RefreshCw, AlertTriangle,
-  Copy, ThumbsUp, ThumbsDown, ArrowRight, MessageCircle,
+  Copy, ThumbsUp, ThumbsDown, ArrowRight, MessageCircle, MoreHorizontal,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Favicon, Score, StatusBadge, IndustryTag, SourceBadge, renderInline } from "./shared";
+import { Favicon, Score, StatusBadge, IndustryTag, SourceBadge, renderInline, renderStreaming } from "./shared";
 import { NewResearchModal, type StartPayload } from "./NewResearchModal";
 import { LinkedInProfileCard } from "./LinkedInProfileCard";
 import { blocksToPlainText, normalizeDomain, companyFromDomain } from "@/lib/research/format";
@@ -37,6 +41,11 @@ const AUDIENCE_STEPS = [
   { label: "Angebots-Ansatz erstellt", detail: "" },
 ];
 
+
+/* Branche kürzen, damit Branche + Ort in die Rail-Breite passen */
+function abbrev(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 1).trimEnd() + "…" : s;
+}
 
 function relTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -72,12 +81,14 @@ function Rail({
 }) {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<RailFilter>("all");
+  const [visible, setVisible] = useState(5);
   const filtered = sessions.filter((s) => {
     if (q && !s.company.toLowerCase().includes(q.toLowerCase())) return false;
     if (filter === "all") return true;
     if (filter === "saved") return !!s.saved_lead_id;
     return s.method === filter;
   });
+  const shown = filtered.slice(0, visible);
   return (
     <div className="air-rail">
       <div className="air-rail-head">
@@ -104,7 +115,8 @@ function Rail({
               </div>
             </div>
           ))
-        ) : filtered.length ? filtered.map((s) => (
+        ) : filtered.length ? (<>
+          {shown.map((s) => (
           <div key={s.id} className={`air-session ${s.id === activeId ? "is-active" : ""}`} onClick={() => onSelect(s.id)}>
             <Favicon web={s.website} company={s.company} />
             <div className="air-session-info">
@@ -112,25 +124,43 @@ function Rail({
                 <div className="air-session-name">{s.company}</div>
                 <span className="air-session-when">{relTime(s.updated_at)}</span>
               </div>
-              <div className="air-session-meta">{[s.industry, s.city].filter(Boolean).join(" · ") || "Recherche"}</div>
+              <div className="air-session-meta">{[s.industry ? abbrev(s.industry, s.city ? 20 : 32) : null, s.city].filter(Boolean).join(" · ") || "Recherche"}</div>
             </div>
-            <button
-              className="air-session-del"
-              title="Recherche löschen"
-              onClick={(e) => { e.stopPropagation(); onDelete(s.id); }}
-            >
-              <Trash2 width={14} height={14} />
-            </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="air-session-del" title="Optionen" onClick={(e) => e.stopPropagation()}>
+                  <MoreHorizontal width={15} height={15} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44 bg-white" onClick={(e) => e.stopPropagation()}>
+                <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Aktionen</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-xs gap-2 cursor-pointer text-destructive focus:text-destructive"
+                  onClick={(e) => { e.stopPropagation(); onDelete(s.id); }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Löschen
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-        )) : <div className="air-rail-empty">{q || filter !== "all" ? "Keine Treffer." : "Noch keine Recherchen."}</div>}
+          ))}
+          {filtered.length > visible && (
+            <button className="air-load-more" onClick={() => setVisible((v) => v + 10)}>
+              Mehr laden <span className="air-load-more-count">({filtered.length - visible})</span>
+            </button>
+          )}
+        </>) : <div className="air-rail-empty">{q || filter !== "all" ? "Keine Treffer." : "Noch keine Recherchen."}</div>}
       </div>
     </div>
   );
 }
 
 /* ════════════════════════════ Messages ════════════════════════════ */
-function AiMessage({ msg, onRegenerate, busy, sources }: { msg: ResearchMessage; onRegenerate?: (id: string) => Promise<void>; busy?: boolean; sources?: ResearchSource[] }) {
+function AiMessage({ msg, onRegenerate, busy, sources, animate }: { msg: ResearchMessage; onRegenerate?: (id: string) => Promise<void>; busy?: boolean; sources?: ResearchSource[]; animate?: boolean }) {
   const blocks = msg.blocks ?? [];
+  const counter = { i: 0 }; // läuft über alle Blöcke der Nachricht weiter (Streaming-Reihenfolge)
+  const ri = (t: string) => (animate ? renderStreaming(t, sources, counter) : renderInline(t, sources));
   const [fb, setFb] = useState<"up" | "down" | null>(null);
   const [regen, setRegen] = useState(false);
   function copy() {
@@ -159,9 +189,9 @@ function AiMessage({ msg, onRegenerate, busy, sources }: { msg: ResearchMessage;
         ) : (
           <>
             {blocks.map((b, i) => {
-              if (b.type === "h") return <h4 key={i}>{b.text}</h4>;
-              if (b.type === "ul") return <ul key={i}>{b.items.map((it, j) => <li key={j}>{renderInline(it, sources)}</li>)}</ul>;
-              return <p key={i}>{renderInline(b.text, sources)}</p>;
+              if (b.type === "h") return <h4 key={i}>{ri(b.text)}</h4>;
+              if (b.type === "ul") return <ul key={i}>{b.items.map((it, j) => <li key={j}>{ri(it)}</li>)}</ul>;
+              return <p key={i}>{ri(b.text)}</p>;
             })}
             <div className="air-ai-meta">
               <span className="label">War das hilfreich?</span>
@@ -325,6 +355,25 @@ function ChatColumn({
   const [prevSid, setPrevSid] = useState(session.id);
   if (session.id !== prevSid) { setPrevSid(session.id); setShowAll(false); }
 
+  // Streaming-Reveal nur für die gerade frisch eingetroffene KI-Nachricht (nicht beim
+  // Verlauf-Laden oder Session-Wechsel) — sonst „tippen" alte Antworten erneut.
+  const [animateId, setAnimateId] = useState<string | null>(null);
+  const animPrevSid = useRef(session.id);
+  const knownIds = useRef<Set<string>>(new Set(session.messages.map((m) => m.id)));
+  useEffect(() => {
+    if (animPrevSid.current !== session.id) {
+      animPrevSid.current = session.id;
+      knownIds.current = new Set(session.messages.map((m) => m.id));
+      setAnimateId(null);
+      return;
+    }
+    const fresh = session.messages.filter((m) => !knownIds.current.has(m.id));
+    if (!fresh.length) return;
+    knownIds.current = new Set(session.messages.map((m) => m.id));
+    const lastAi = [...fresh].reverse().find((m) => m.role !== "user" && !m.card && !m.person && !!m.blocks?.length);
+    if (lastAi) setAnimateId(lastAi.id);
+  }, [session.id, session.messages]);
+
   useEffect(() => {
     const el = threadRef.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -368,25 +417,31 @@ function ChatColumn({
       <div className="air-chat-head">
         <Favicon web={session.website} company={session.company} />
         <div className="air-chat-head-info">
-          <h2>{session.company}</h2>
+          <div className="air-chat-head-title">
+            <h2>{session.company}</h2>
+            {session.status && <StatusBadge status={session.status} />}
+          </div>
           <div className="sub">
             <IndustryTag industry={session.industry} />
-            {session.website && <><span className="air-sep" /><a href={`https://${normalizeDomain(session.website)}`} target="_blank" rel="noreferrer">{normalizeDomain(session.website)}</a></>}
-            {session.city && <><span className="air-sep" /><span>{[session.city, session.state].filter(Boolean).join(", ")}</span></>}
+            {session.website && <a href={`https://${normalizeDomain(session.website)}`} target="_blank" rel="noreferrer">{normalizeDomain(session.website)}</a>}
+            {session.city && <span>{[session.city, session.state].filter(Boolean).join(", ")}</span>}
           </div>
         </div>
         {session.score != null && (
           <div className="air-head-score">
-            {session.status && <StatusBadge status={session.status} />}
             <Score value={session.score} />
           </div>
         )}
         <div className="air-chat-head-actions">
-          <button className={`btn btn-sm ${saved ? "btn-outline" : "btn-default"}`} onClick={onSave} disabled={saved || saving}>
-            {saved ? <><Check width={14} height={14} /> Im CRM gespeichert</>
-              : saving ? <>Speichert …</>
-                : <><Plus width={14} height={14} /> Als Lead</>}
-          </button>
+          {session.saved_lead_id ? (
+            <a className="btn btn-sm btn-outline" href={`/dashboard/leads?lead=${session.saved_lead_id}`} style={{ textDecoration: "none" }}>
+              <ExternalLink width={14} height={14} /> Zum Lead
+            </a>
+          ) : (
+            <button className="btn btn-sm btn-default" onClick={onSave} disabled={saving}>
+              {saving ? <>Speichert …</> : <><Plus width={14} height={14} /> Als Lead</>}
+            </button>
+          )}
           {session.website && (
             <a className="icon-btn icon-btn-outline" href={`https://${normalizeDomain(session.website)}`} target="_blank" rel="noreferrer" title="Website öffnen"><ExternalLink width={15} height={15} /></a>
           )}
@@ -413,7 +468,7 @@ function ChatColumn({
             m.role === "user" ? <UserMessage key={m.id} text={m.text ?? ""} />
               : m.role === "system" && m.card ? <SavedCardView key={m.id} card={m.card} />
                 : m.person ? <PersonMessage key={m.id} msg={m} company={session.company} />
-                  : <AiMessage key={m.id} msg={m} onRegenerate={onRegenerate} busy={busy} sources={session.sources} />
+                  : <AiMessage key={m.id} msg={m} onRegenerate={onRegenerate} busy={busy} sources={session.sources} animate={animateId === m.id} />
           ))}
           {busy && <Typing />}
         </div>
@@ -488,10 +543,36 @@ export function AiResearcher() {
         const j = await res.json();
         const list: ResearchSession[] = j.data ?? [];
         setSessions(list);
-        if (list.length) { setActiveId(list[0].id); loadDetail(list[0].id); }
+
+        const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+        const sid = params?.get("session");
+        const leadId = params?.get("leadId");
+
+        // Deep-Link aus dem Lead-Sheet: ?leadId=<id> → bestehende Recherche öffnen ODER neue starten
+        if (leadId) {
+          const existing = list.find((s) => s.lead_id === leadId || s.saved_lead_id === leadId);
+          if (params) { params.delete("leadId"); window.history.replaceState(null, "", `${window.location.pathname}${params.toString() ? `?${params}` : ""}`); }
+          if (existing) { setActiveId(existing.id); loadDetail(existing.id); }
+          else {
+            try {
+              const lr = await fetch(`/api/leads/${leadId}`);
+              const lead = lr.ok ? (await lr.json()).data : null;
+              startResearch({ method: "crm", leadId, company: lead?.company ?? "Lead", website: lead?.website ?? null });
+            } catch { startResearch({ method: "crm", leadId, company: "Lead", website: null }); }
+          }
+          return;
+        }
+
+        if (list.length) {
+          // ?session=<id> → direkt diese Recherche öffnen
+          const target = sid && list.some((s) => s.id === sid) ? sid : list[0].id;
+          setActiveId(target);
+          loadDetail(target);
+        }
       } catch { /* ignore */ }
       finally { setSessionsLoading(false); }
     })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadDetail]);
 
   function selectSession(id: string) {

@@ -71,12 +71,52 @@ export function renderInline(text: string, sources?: ResearchSource[]): React.Re
       return <a key={i} className="air-inline-link" href={lm[2]} target="_blank" rel="noreferrer">{lm[1]}</a>;
     }
     if (/^https?:\/\/\S+$/.test(seg)) {
-      return <a key={i} className="air-inline-link" href={seg} target="_blank" rel="noreferrer">{prettyUrl(seg)}</a>;
+      // Satzzeichen am Ende nicht in den Link ziehen (sonst kaputter href wie „example.com.")
+      const m = seg.match(/^(https?:\/\/[^\s)]+?)([.,;:!?»"'’]*)$/);
+      const url = m ? m[1] : seg;
+      const trail = m ? m[2] : "";
+      return <React.Fragment key={i}><a className="air-inline-link" href={url} target="_blank" rel="noreferrer">{prettyUrl(url)}</a>{trail}</React.Fragment>;
     }
     const bm = seg.match(/^\*\*([^*]+)\*\*$/);
     if (bm) return <strong key={i}>{bm[1]}</strong>;
     return <React.Fragment key={i}>{seg}</React.Fragment>;
   });
+}
+
+/* ── Streaming-Reveal: wie renderInline, aber jedes Wort als gestaffelt einblendendes
+   <span> (ChatGPT-artiges Tippen). `counter` läuft über die ganze Nachricht weiter,
+   damit Wörter über Absätze/Listen hinweg in Reihenfolge erscheinen. */
+const SEG_RE = /(\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^)]+\)|https?:\/\/[^\s)]+|\[\[\d+\]\])/;
+const WORD_STEP = 24; // ms pro Wort
+export function renderStreaming(
+  text: string,
+  sources: ResearchSource[] | undefined,
+  counter: { i: number },
+): React.ReactNode[] {
+  const parts = text.split(new RegExp(SEG_RE, "g")).filter(Boolean);
+  const nodes: React.ReactNode[] = [];
+  parts.forEach((seg, p) => {
+    if (SEG_RE.test(seg)) {
+      // Spezial-Token (Link/Fett/Zitat) als ein Wort einblenden
+      const delay = counter.i++ * WORD_STEP;
+      nodes.push(
+        <span key={`s${p}`} className="air-word" style={{ animationDelay: `${delay}ms` }}>
+          {renderInline(seg, sources)}
+        </span>,
+      );
+      return;
+    }
+    // Klartext: an Wortgrenzen splitten, Leerraum unverändert lassen
+    seg.split(/(\s+)/).forEach((tok, j) => {
+      if (!tok) return;
+      if (/^\s+$/.test(tok)) { nodes.push(<React.Fragment key={`g${p}-${j}`}>{tok}</React.Fragment>); return; }
+      const delay = counter.i++ * WORD_STEP;
+      nodes.push(
+        <span key={`w${p}-${j}`} className="air-word" style={{ animationDelay: `${delay}ms` }}>{tok}</span>,
+      );
+    });
+  });
+  return nodes;
 }
 
 /* ── Score-Balken ── */

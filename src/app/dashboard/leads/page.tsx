@@ -58,8 +58,7 @@ import { cn } from "@/lib/utils";
 import type { SearchFormValues, SearchSource } from "@/components/leads/LeadSearchForm";
 
 import type { Lead, LeadStatus, SearchJob } from "@/types/leads";
-import { INDUSTRY_OPTIONS } from "@/types/leads";
-import { AT_BUNDESLAENDER } from "@/lib/bundesland";
+import { getRegionOptions, getRegionLabel } from "@/types/leads";
 import { createClient as createBrowserClient } from "@/lib/supabase/client";
 
 // We need a ref to the table instance for the DataTableViewOptions
@@ -156,12 +155,12 @@ function FilterTriggerPopover(props: FilterTriggerPopoverProps) {
         </button>
       </PopoverTrigger>
       <PopoverContent
-        className="w-[260px] p-0"
+        className="w-[260px] p-0 bg-white"
         align="start"
         onWheel={(e) => e.stopPropagation()}
         onTouchMove={(e) => e.stopPropagation()}
       >
-        <Command>
+        <Command className="bg-white">
           <CommandInput placeholder={searchPlaceholder} className="h-9 text-[13px]" />
           <CommandList className="max-h-[260px] overflow-y-auto overscroll-contain">
             <CommandEmpty className="py-4 text-center text-[12px] text-muted-foreground">{emptyText}</CommandEmpty>
@@ -329,10 +328,17 @@ export default function LeadScrapingPage() {
 
   /* ── Sorting & Column Visibility ── */
   const [sorting, setSorting] = useState<SortingState>([]);
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => {
+    if (typeof window === "undefined") return {};
+    try { return JSON.parse(localStorage.getItem("leads-col-visibility") || "{}") as VisibilityState; } catch { return {}; }
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try { localStorage.setItem("leads-col-visibility", JSON.stringify(columnVisibility)); } catch { /* ignore */ }
+  }, [columnVisibility]);
 
   /* ── Dynamic Filter Options ── */
-  const [industryOptions, setIndustryOptions] = useState<{ value: string; label: string }[]>([...INDUSTRY_OPTIONS]);
+  const [industryOptions, setIndustryOptions] = useState<{ value: string; label: string }[]>([]);
   const [legalFormOptions, setLegalFormOptions] = useState<{ value: string; label: string }[]>([]);
   const [cityOptions, setCityOptions]     = useState<{ value: string; label: string }[]>([]);
   const [countryOptions, setCountryOptions] = useState<{ value: string; label: string }[]>([]);
@@ -421,13 +427,8 @@ export default function LeadScrapingPage() {
         if (!res.ok) return;
         const json = await res.json();
         const dbValues = (json.data as string[]);
-        // INDUSTRY_OPTIONS als Master-Liste + eventuelle DB-Werte die noch nicht in OPTIONS sind
-        const optionsSet = new Set<string>(INDUSTRY_OPTIONS.map((o) => o.value as string));
-        const merged: { value: string; label: string }[] = [
-          ...INDUSTRY_OPTIONS,
-          ...dbValues.filter((v) => !optionsSet.has(v)).map((v) => ({ value: v, label: v })),
-        ];
-        setIndustryOptions(merged);
+        // Nur tatsächlich vorhandene Branchen aus den Daten — keine vorgefertigte Master-Liste.
+        setIndustryOptions(dbValues.map((v) => ({ value: v, label: v })));
       } catch { /* silent */ }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -699,6 +700,8 @@ export default function LeadScrapingPage() {
               require_ceo:     values.require_ceo || false,
               require_email:   values.require_email || false,
               require_website: values.require_website || false,
+              min_employees:   values.min_employees ? Number(values.min_employees) : undefined,
+              max_results:     values.max_results ? Number(values.max_results) : undefined,
             }),
           });
           if (!res.ok) {
@@ -1138,27 +1141,26 @@ export default function LeadScrapingPage() {
 
               <div className="flex items-center gap-2 flex-wrap">
                 <FilterTriggerPopover
+                  label="Land"
+                  value={filterCountry !== "all" ? (countryOptions.find((o) => o.value === filterCountry)?.label ?? filterCountry) : null}
+                  onClear={() => { setFilterCountry("all"); setFilterStates([]); }}
+                  selectValue={filterCountry}
+                  onSelectChange={(v) => { setFilterCountry(v); setFilterStates([]); }}
+                  options={countryOptions}
+                  searchPlaceholder="Land suchen…"
+                  emptyText="Kein Land gefunden"
+                />
+
+                <FilterTriggerPopover
                   label="Branche"
                   value={filterIndustries.length > 0 ? `${filterIndustries.length === 1 ? filterIndustries[0] : `${filterIndustries.length} ausgewählt`}` : null}
                   onClear={() => setFilterIndustries([])}
                   multi
                   selectValue={filterIndustries}
                   onSelectChange={setFilterIndustries}
-                  options={industryOptions.length > 0 ? industryOptions : [...INDUSTRY_OPTIONS]}
+                  options={industryOptions}
                   searchPlaceholder="Branche suchen…"
-                  emptyText="Keine Branche gefunden"
-                />
-
-                <FilterTriggerPopover
-                  label="Bundesland"
-                  value={filterStates.length > 0 ? (filterStates.length === 1 ? filterStates[0] : `${filterStates.length} ausgewählt`) : null}
-                  onClear={() => setFilterStates([])}
-                  multi
-                  selectValue={filterStates}
-                  onSelectChange={setFilterStates}
-                  options={AT_BUNDESLAENDER}
-                  searchPlaceholder="Bundesland suchen…"
-                  emptyText="Kein Bundesland gefunden"
+                  emptyText={industryOptions.length === 0 ? "Noch keine Branchen in den Daten" : "Keine Branche gefunden"}
                 />
 
                 <FilterTriggerPopover
@@ -1170,7 +1172,7 @@ export default function LeadScrapingPage() {
                   onSelectChange={setFilterCities}
                   options={cityOptions}
                   searchPlaceholder="Stadt suchen…"
-                  emptyText="Keine Stadt gefunden"
+                  emptyText={cityOptions.length === 0 ? "Noch keine Städte in den Daten" : "Keine Stadt gefunden"}
                 />
 
                 <FilterTriggerPopover
@@ -1182,19 +1184,32 @@ export default function LeadScrapingPage() {
                   onSelectChange={setFilterLegalForms}
                   options={legalFormOptions}
                   searchPlaceholder="Rechtsform suchen…"
-                  emptyText="Keine Rechtsform in den Daten"
+                  emptyText={legalFormOptions.length === 0 ? "Noch keine Rechtsformen in den Daten" : "Keine Rechtsform gefunden"}
                 />
 
-                <FilterTriggerPopover
-                  label="Land"
-                  value={filterCountry !== "all" ? (countryOptions.find((o) => o.value === filterCountry)?.label ?? filterCountry) : null}
-                  onClear={() => setFilterCountry("all")}
-                  selectValue={filterCountry}
-                  onSelectChange={setFilterCountry}
-                  options={countryOptions}
-                  searchPlaceholder="Land suchen…"
-                  emptyText="Kein Land gefunden"
-                />
+                {/* Bundesland erst nach Land-Auswahl — sonst Hinweis-Toast */}
+                {filterCountry !== "all" ? (
+                  <FilterTriggerPopover
+                    label={getRegionLabel(filterCountry)}
+                    value={filterStates.length > 0 ? (filterStates.length === 1 ? filterStates[0] : `${filterStates.length} ausgewählt`) : null}
+                    onClear={() => setFilterStates([])}
+                    multi
+                    selectValue={filterStates}
+                    onSelectChange={setFilterStates}
+                    options={getRegionOptions(filterCountry).filter((o) => o.value !== "all").map((o) => ({ value: o.value, label: o.label }))}
+                    searchPlaceholder={`${getRegionLabel(filterCountry)} suchen…`}
+                    emptyText={`Kein ${getRegionLabel(filterCountry)} gefunden`}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="filter-trigger"
+                    onClick={() => toast.info("Bitte zuerst ein Land auswählen, dann kannst du nach Bundesland filtern.")}
+                  >
+                    <Plus className="h-3 w-3" strokeWidth={1.75} />
+                    <span className="lbl">Bundesland</span>
+                  </button>
+                )}
 
                 <FilterTriggerPopover
                   label="Kriterien"
@@ -1312,7 +1327,7 @@ export default function LeadScrapingPage() {
                         <SelectTrigger className="h-8 w-[78px] text-sm">
                           <SelectValue />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="bg-white">
                           {PAGE_SIZE_OPTIONS.map((n) => (
                             <SelectItem key={n} value={String(n)} className="text-sm">{n}</SelectItem>
                           ))}
