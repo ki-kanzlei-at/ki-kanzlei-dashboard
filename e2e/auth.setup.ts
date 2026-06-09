@@ -12,8 +12,16 @@
 
 import { test as setup, expect } from "@playwright/test";
 import path from "path";
+import fs from "fs";
 
 const authFile = path.join(__dirname, "..", ".auth", "user.json");
+
+// Eine frische, gecachte Session wiederverwenden statt bei JEDEM Lauf neu
+// einzuloggen. Das vermeidet Supabase-Auth-Rate-Limits (viele Logins in kurzer
+// Zeit lassen den Signin-Endpoint hängen) und macht die Suite schneller +
+// reproduzierbar — wichtig für CI/Multi-Deploy. Der Refresh-Token im State ist
+// tagelang gültig; @supabase/ssr erneuert den Access-Token beim Laden selbst.
+const MAX_SESSION_AGE_MS = 12 * 60 * 60 * 1000; // 12 h
 
 setup("authenticate", async ({ page }) => {
   const email = process.env.TEST_USER_EMAIL;
@@ -26,16 +34,31 @@ setup("authenticate", async ({ page }) => {
     );
   }
 
+  // 1) Gecachte Session wiederverwenden, wenn vorhanden und jung genug.
+  try {
+    const st = fs.statSync(authFile);
+    if (Date.now() - st.mtimeMs < MAX_SESSION_AGE_MS) {
+      const raw = JSON.parse(fs.readFileSync(authFile, "utf8"));
+      if (Array.isArray(raw?.cookies) && raw.cookies.length > 0) {
+        console.log("[Auth-Setup] Gecachte Session wiederverwendet (kein erneuter Login)");
+        return;
+      }
+    }
+  } catch { /* keine/ungültige Datei → frisch einloggen */ }
+
+  // 2) Frisch einloggen (großzügiges Timeout für kalten Dev-Server + Signin).
   await page.goto("/login");
 
-  // Selektoren über Placeholder (shadcn FormLabel bindet nicht via htmlFor)
-  await page.getByPlaceholder("name@firma.at").fill(email);
-  await page.locator('input[type="password"]').first().fill(password);
+  // Stabile Selektoren über die Input-IDs (#login-email / #login-pwd) — Labels
+  // und Placeholder ändern sich beim Redesign, die IDs bleiben.
+  await page.locator("#login-email").fill(email);
+  await page.locator("#login-pwd").fill(password);
   await page.getByRole("button", { name: /Anmelden/ }).click();
 
-  // Warten bis auf /dashboard weitergeleitet
-  await page.waitForURL(/\/dashboard/, { timeout: 20_000 });
-  await expect(page).toHaveURL(/\/dashboard/);
+  // Warten bis weg von /login (Dashboard ODER Onboarding) — Session-Cookie ist
+  // dann gesetzt, unabhängig vom Redirect-Ziel.
+  await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 45_000 });
+  await expect(page).not.toHaveURL(/\/login/);
 
   // Storage State speichern (Cookies + LocalStorage)
   await page.context().storageState({ path: authFile });
