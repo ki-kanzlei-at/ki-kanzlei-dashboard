@@ -24,6 +24,32 @@ import type {
 
 const GEMINI_MODEL = "gemini-2.5-flash";
 
+/**
+ * Wiederholt einen Gemini-Call bei transienten Fehlern (überlastet/Rate-Limit:
+ * 429/500/502/503/504, „overloaded"/„unavailable"). Solche Fehler kommen schnell
+ * zurück → kurzes Backoff hält uns klar im 60s-Budget der Route. Nicht-transiente
+ * Fehler (z.B. ungültiger Key) werden sofort durchgereicht.
+ *
+ * Grund: Das Google-Grounding liefert unter Last sporadisch 503; ohne Retry
+ * landet das als 502 beim Nutzer (Toast + manueller Neustart). Mit Retry werden
+ * die allermeisten Aussetzer serverseitig absorbiert — wichtig für Multi-Deploy.
+ */
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3, baseMs = 700): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      const transient = /\b(429|500|502|503|504)\b|overloaded|unavailable|rate.?limit|ECONNRESET|fetch failed/i.test(msg);
+      if (!transient || i === attempts - 1) throw err;
+      await new Promise((r) => setTimeout(r, baseMs * 2 ** i + Math.floor(Math.random() * 200)));
+    }
+  }
+  throw lastErr;
+}
+
 /** Verkäufer-Kontext (aus user_settings.brand_settings) — steuert Persona & Produkt-Fit. */
 export interface SellerContext {
   companyName?: string | null;
@@ -123,7 +149,7 @@ async function groundedGenerate(
     generationConfig: { temperature: 0.35 },
   } as unknown as Parameters<GoogleGenerativeAI["getGenerativeModel"]>[0]);
 
-  const result = await model.generateContent(prompt);
+  const result = await withRetry(() => model.generateContent(prompt));
   const text = result.response.text();
 
   const meta = result.response.candidates?.[0]?.groundingMetadata as
@@ -150,7 +176,7 @@ async function jsonGenerate<T>(genAI: GoogleGenerativeAI, prompt: string, person
       systemInstruction: persona,
       generationConfig: { temperature: 0.2, responseMimeType: "application/json" },
     } as unknown as Parameters<GoogleGenerativeAI["getGenerativeModel"]>[0]);
-    const result = await model.generateContent(prompt);
+    const result = await withRetry(() => model.generateContent(prompt));
     return JSON.parse(result.response.text()) as T;
   } catch {
     return null;
@@ -394,7 +420,7 @@ AUFGABE — Überblick in DIESEM Format (Markdown), 120–200 Wörter:
       const model = genAI.getGenerativeModel({
         model: GEMINI_MODEL, systemInstruction: persona, generationConfig: { temperature: 0.4 },
       } as unknown as Parameters<GoogleGenerativeAI["getGenerativeModel"]>[0]);
-      const r2 = await model.generateContent(`${overviewPrompt}\n\nNutze AUSSCHLIESSLICH den oben genannten Website-Inhalt. Erfinde keine Zahlen.`);
+      const r2 = await withRetry(() => model.generateContent(`${overviewPrompt}\n\nNutze AUSSCHLIESSLICH den oben genannten Website-Inhalt. Erfinde keine Zahlen.`));
       const t2 = r2.response.text().trim();
       if (t2) { blocks = parseBlocks(t2); grounded = true; }
     } catch { /* nächster Fallback */ }
@@ -598,7 +624,7 @@ TEXT:
 ${currentMarkdown}`;
 
   try {
-    const result = await model.generateContent(prompt);
+    const result = await withRetry(() => model.generateContent(prompt));
     const text = result.response.text().trim();
     const blocks = parseBlocks(text);
     // Bei leerem/kaputtem Ergebnis lieber das Original behalten als nichts.
@@ -770,7 +796,7 @@ Schreibe einen kompakten Überblick auf Deutsch (Markdown), ohne Vorrede:
       systemInstruction: persona,
       generationConfig: { temperature: 0.6 },
     } as unknown as Parameters<GoogleGenerativeAI["getGenerativeModel"]>[0]);
-    const result = await model.generateContent(prompt);
+    const result = await withRetry(() => model.generateContent(prompt));
     const blocks = parseBlocks(result.response.text().trim());
     return {
       grounded: true,

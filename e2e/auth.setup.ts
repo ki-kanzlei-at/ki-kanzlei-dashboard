@@ -28,14 +28,16 @@ setup("authenticate", async ({ page }) => {
 
   await page.goto("/login");
 
-  // Selektoren über Placeholder (shadcn FormLabel bindet nicht via htmlFor)
-  await page.getByPlaceholder("name@firma.at").fill(email);
-  await page.locator('input[type="password"]').first().fill(password);
+  // Stabile Selektoren über die Input-IDs (#login-email / #login-pwd) — Labels
+  // und Placeholder ändern sich beim Redesign, die IDs bleiben.
+  await page.locator("#login-email").fill(email);
+  await page.locator("#login-pwd").fill(password);
   await page.getByRole("button", { name: /Anmelden/ }).click();
 
-  // Warten bis auf /dashboard weitergeleitet
-  await page.waitForURL(/\/dashboard/, { timeout: 20_000 });
-  await expect(page).toHaveURL(/\/dashboard/);
+  // Warten bis weg von /login (Dashboard ODER Onboarding) — Session-Cookie ist
+  // dann gesetzt, unabhängig vom Redirect-Ziel.
+  await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 20_000 });
+  await expect(page).not.toHaveURL(/\/login/);
 
   // Storage State speichern (Cookies + LocalStorage)
   await page.context().storageState({ path: authFile });
