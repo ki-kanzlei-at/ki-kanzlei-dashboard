@@ -220,14 +220,13 @@ function fallbackBody(opts: {
   const company = opts.lead.company || "Ihre Kanzlei";
   const city = opts.lead.city || "Ihrer Region";
   const industry = opts.lead.industry || "Branche";
-  const senderName = opts.campaign.sender_name || "Ihr Team";
 
   if (opts.stepIndex === 0) {
+    // Kein Absendername am Ende — der kommt über die Signatur (sonst doppelt).
     return [
       `${company} ist mir aufgefallen, vor allem im Kontext von ${industry} in ${city}.`,
       `Bei vergleichbaren Unternehmen konnten wir mit unserer Lösung wiederkehrende Aufgaben spürbar verkürzen.`,
       `Hätten Sie kommende Woche 15 Minuten Zeit für einen kurzen Austausch?`,
-      `${senderName}`,
     ].join("\n\n");
   }
   if (opts.stepIndex >= opts.campaign.sequence_steps.length - 1) {
@@ -325,8 +324,10 @@ function wrapHtml(
   const signature = opts.signatureHtml
     ? `<div style="margin:16px 0 0;color:#334155">${opts.signatureHtml}</div>`
     : "";
+  // Sichtbares 1×1-Pixel am Mail-Ende — display:none wird von einigen
+  // Clients nicht geladen und würde Öffnungen unterzählen.
   const pixel = opts.trackingPixelUrl
-    ? `<img src="${opts.trackingPixelUrl}" width="1" height="1" alt="" style="display:none" />`
+    ? `<img src="${opts.trackingPixelUrl}" width="1" height="1" alt="" style="border:0;display:block;max-height:1px;overflow:hidden" />`
     : "";
   const unsub = opts.unsubscribeEmail
     ? `<p style="margin:18px 0 0;font-size:12px;color:#8a8a8a">Keine weiteren E-Mails gewünscht? `

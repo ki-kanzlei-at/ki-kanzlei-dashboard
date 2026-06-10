@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Mail, Plus, Check, Info } from "lucide-react";
+import { Mail, Plus, Check } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { MailboxOption, MailboxState } from "./types";
@@ -110,14 +110,10 @@ export function StepMailbox({ state, onChange }: StepMailboxProps) {
   return (
     <>
       <div className="step-head">
-        <div className="step-eyebrow">
-          <Mail className="h-3 w-3" strokeWidth={1.75} />
-          Schritt 1 von 5
-        </div>
+        <div className="step-eyebrow">Schritt 1 von 5</div>
         <h1 className="step-heading">Welche Mailbox versendet?</h1>
         <p className="step-desc">
           Wähle eines deiner verbundenen E-Mail-Konten als Absender.
-          Tägliches Limit und Warm-up-Status werden pro Mailbox verwaltet.
         </p>
       </div>
 
@@ -199,17 +195,6 @@ export function StepMailbox({ state, onChange }: StepMailboxProps) {
         </div>
       </Link>
 
-      {state.mailboxId && (
-        <div className="wiz-callout" style={{ marginTop: 18 }}>
-          <Info className="ico h-4 w-4" strokeWidth={1.75} />
-          <div>
-            <div className="t">Mehrere Mailboxen rotieren?</div>
-            <div className="b">
-              Du kannst später mehrere Mailboxen für diese Kampagne hinzufügen. Wir verteilen Mails automatisch und halten alle unter ihrem Tageslimit.
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

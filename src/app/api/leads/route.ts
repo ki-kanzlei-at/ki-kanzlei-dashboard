@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getLeads, insertLeads } from "@/lib/supabase/leads";
+import { getLeads, getLeadIds, insertLeads } from "@/lib/supabase/leads";
 import type { LeadStatus, LeadInsert } from "@/types/leads";
 
 const VALID_STATUSES: LeadStatus[] = [
@@ -53,6 +53,11 @@ export async function GET(request: NextRequest) {
     const sortDir = searchParams.get("sort_dir");
     const page = parseInt(searchParams.get("page") ?? "1", 10);
     const limit = parseInt(searchParams.get("limit") ?? "20", 10);
+    const idsOnly = searchParams.get("ids_only") === "true";
+    const excludeStatusRaw = searchParams.get("exclude_status");
+    const excludeStatus = excludeStatusRaw
+      ? (excludeStatusRaw.split(",").filter((s) => VALID_STATUSES.includes(s as LeadStatus)) as LeadStatus[])
+      : undefined;
 
     // Validierung
     if (statusParam && !VALID_STATUSES.includes(statusParam as LeadStatus)) {
@@ -76,24 +81,33 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const filters = {
+      status: statusParam as LeadStatus | undefined,
+      exclude_status: excludeStatus,
+      search_query: searchQuery ?? undefined,
+      search: search ?? undefined,
+      industry: industry ?? undefined,
+      city: city ?? undefined,
+      country: country ?? undefined,
+      state: state ?? undefined,
+      legal_form: legalForm ?? undefined,
+      search_job_id: searchJobId ?? undefined,
+      has_ceo: hasCeo === "true" ? true : undefined,
+      has_email: hasEmail === "true" ? true : undefined,
+      has_phone: hasPhone === "true" ? true : undefined,
+      has_website: hasWebsite === "true" ? true : undefined,
+      has_social: hasSocial === "true" ? true : undefined,
+    };
+
+    /* IDs-only-Modus: alle Treffer-IDs (für "Alle auswählen" im Kampagnen-Wizard) */
+    if (idsOnly) {
+      const { ids, count } = await getLeadIds(filters);
+      return NextResponse.json({ data: ids, count });
+    }
+
     // Leads aus der Datenbank abrufen (DAL nutzt intern Server-Client mit RLS)
     const result = await getLeads(
-      {
-        status: statusParam as LeadStatus | undefined,
-        search_query: searchQuery ?? undefined,
-        search: search ?? undefined,
-        industry: industry ?? undefined,
-        city: city ?? undefined,
-        country: country ?? undefined,
-        state: state ?? undefined,
-        legal_form: legalForm ?? undefined,
-        search_job_id: searchJobId ?? undefined,
-        has_ceo: hasCeo === "true" ? true : undefined,
-        has_email: hasEmail === "true" ? true : undefined,
-        has_phone: hasPhone === "true" ? true : undefined,
-        has_website: hasWebsite === "true" ? true : undefined,
-        has_social: hasSocial === "true" ? true : undefined,
-      },
+      filters,
       { page, pageSize: limit },
       {
         sort_by: sortBy ?? undefined,

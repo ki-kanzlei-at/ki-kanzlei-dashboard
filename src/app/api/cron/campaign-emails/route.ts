@@ -33,6 +33,12 @@ import type { Campaign } from "@/types/campaigns";
 export const maxDuration = 300;
 
 const MAX_LEADS_PER_CAMPAIGN_PER_RUN = 10;
+/* Zeitbudget pro Lauf: rechtzeitig vor maxDuration sauber aussteigen, damit
+ * der Lauf nie mitten im Send-Update gekillt wird. */
+const RUN_TIME_BUDGET_MS = 240_000;
+/* Claim-Fenster: solange gilt ein Lead als "in Bearbeitung" — ein paralleler
+ * oder direkt folgender Lauf fasst ihn nicht an (Schutz vor Doppelversand). */
+const CLAIM_WINDOW_MS = 15 * 60_000;
 
 export async function GET(request: NextRequest) {
   try {
@@ -60,6 +66,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ message: "Keine aktiven Kampagnen", processed: 0 });
     }
 
+    /* Fairness zwischen Usern/Kampagnen: Reihenfolge pro Lauf mischen, damit
+     * bei knappem Zeitbudget nicht immer dieselben Kampagnen zuerst (und die
+     * letzten nie) drankommen. */
+    for (let i = campaigns.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [campaigns[i], campaigns[j]] = [campaigns[j], campaigns[i]];
+    }
+
+    const runStartedAt = Date.now();
+
     const baseUrl =
       process.env.NEXT_PUBLIC_APP_URL
       || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
@@ -68,7 +84,13 @@ export async function GET(request: NextRequest) {
     let totalFailed = 0;
     let totalSkipped = 0;
 
+    let timedOut = false;
+
     for (const campaign of campaigns) {
+      if (Date.now() - runStartedAt > RUN_TIME_BUDGET_MS) {
+        timedOut = true;
+        break;
+      }
       try {
         /* User-Settings früh laden — globale Versand-Defaults gelten als
          * Fallback fürs Sendefenster, Gesamtlimit, Pause/Jitter, Tracking,
@@ -155,12 +177,20 @@ export async function GET(request: NextRequest) {
         const unsubLink = cs?.unsub_link ?? true;
         const jitterPct = Math.max(0, Math.min(50, cs?.send_jitter ?? 20)) / 100;
 
+        let campaignErrorCleared = false;
+
         for (const cl of dueLeads) {
+          /* Zeitbudget: lieber sauber aussteigen als mitten im Send sterben */
+          if (Date.now() - runStartedAt > RUN_TIME_BUDGET_MS) {
+            timedOut = true;
+            break;
+          }
           /* Tages-Gesamtlimit auch innerhalb des Laufs respektieren */
           if (totalDailyCap > 0 && userSentToday >= totalDailyCap) {
             totalSkipped++;
             break;
           }
+
           const lead = cl.lead;
           if (!lead?.email) {
             await admin
@@ -185,6 +215,27 @@ export async function GET(request: NextRequest) {
               .from("campaign_leads")
               .update({ status: "completed", next_send_at: null })
               .eq("id", cl.id);
+            continue;
+          }
+
+          /* ── Atomarer Claim gegen Doppelversand ──
+           * next_send_at wird VOR dem Versand nach vorne geschoben — nur wenn
+           * die Zeile noch im fälligen Zustand ist. Greifen zwei überlappende
+           * Cron-Läufe zur gleichen Zeile, bekommt genau einer den Zuschlag.
+           * Stirbt der Lauf zwischen Send und Update, wird der Lead erst nach
+           * dem Claim-Fenster erneut angefasst (statt sofort doppelt). */
+          const claimUntil = new Date(Date.now() + CLAIM_WINDOW_MS).toISOString();
+          const { data: claimed } = await admin
+            .from("campaign_leads")
+            .update({ next_send_at: claimUntil })
+            .eq("id", cl.id)
+            .eq("step_index", stepIndex)
+            .not("status", "in", "(replied,bounced,failed,completed)")
+            .or(`next_send_at.is.null,next_send_at.lte.${new Date().toISOString()}`)
+            .select("id");
+          if (!claimed || claimed.length === 0) {
+            // Bereits von einem anderen Lauf übernommen (oder Status hat sich geändert)
+            totalSkipped++;
             continue;
           }
 
@@ -254,11 +305,18 @@ export async function GET(request: NextRequest) {
 
             const replyTo = campaign.reply_to || account.reply_to || undefined;
 
+            /* List-Unsubscribe-Header: Gmail/Yahoo verlangen ihn für
+             * Bulk-Versand — verbessert Zustellbarkeit & DSGVO-Konformität. */
+            const mailHeaders = unsubscribeEmail
+              ? { "List-Unsubscribe": `<mailto:${unsubscribeEmail}?subject=Abmelden>` }
+              : undefined;
+
             await sendEmailViaAccount(account, {
               to: lead.email,
               subject: mail.subject,
               htmlBody: htmlWithClickTracking,
               replyTo: replyTo ?? undefined,
+              headers: mailHeaders,
             });
 
             /* Sequenz fortschreiben */
@@ -317,6 +375,18 @@ export async function GET(request: NextRequest) {
             userSentToday++;
             await incrementCampaignCounter(campaign.id, "sent_count");
             totalSent++;
+
+            /* Versand klappt wieder → alte Kampagnen-Fehlermeldung
+             * ("Credits aufgebraucht", "Keine aktive Mailbox", …) zurücksetzen */
+            if (!campaignErrorCleared) {
+              campaignErrorCleared = true;
+              if (campaign.error_message) {
+                await admin
+                  .from("campaigns")
+                  .update({ error_message: null })
+                  .eq("id", campaign.id);
+              }
+            }
           } catch (err) {
             const errorMsg = err instanceof Error ? err.message : "Unbekannter Fehler";
             console.error(`[Cron] Send-Fehler an ${lead.email} via ${account.sender_email}:`, errorMsg);
@@ -336,14 +406,15 @@ export async function GET(request: NextRequest) {
 
           /* Inter-Send Gap (Anti-Burst). Basis: Kampagnen-gap_seconds, sonst die
            * globale "Pause zwischen E-Mails" (delay_minutes). Mit ±Jitter.
-           * Im Serverless-Lauf gedeckelt (0,1× / max 30 s), echtes Pacing macht
-           * die Cron-Frequenz. */
+           * Im Serverless-Lauf hart gedeckelt (0,1× / max 5 s) — echtes Pacing
+           * macht die Cron-Frequenz. Längere Sleeps würden bei vielen Usern
+           * das Zeitbudget eines Laufs auffressen. */
           const baseGapSec = campaign.schedule?.gap_seconds
             ?? (cs?.delay_minutes ? cs.delay_minutes * 60 : 180);
           const gapJitter = 1 + (Math.random() * 2 - 1) * jitterPct;
           const gapMs = Math.min(
             Math.max(0, baseGapSec * gapJitter) * 1000 * 0.1,
-            30_000,
+            5_000,
           );
           if (gapMs > 0) {
             await new Promise((r) => setTimeout(r, gapMs));
@@ -357,11 +428,12 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
-      message: "Cron abgeschlossen",
+      message: timedOut ? "Cron: Zeitbudget erreicht (Rest im nächsten Lauf)" : "Cron abgeschlossen",
       processed: totalSent + totalFailed,
       sent: totalSent,
       failed: totalFailed,
       skipped: totalSkipped,
+      timed_out: timedOut,
     });
   } catch (err) {
     console.error("[Cron campaign-emails]", err);
@@ -413,15 +485,32 @@ function isInCampaignWindow(campaign: Campaign, fallback?: SendWindow): boolean 
 async function isOverDailyLimit(campaign: Campaign): Promise<boolean> {
   if (!campaign.daily_limit || campaign.daily_limit <= 0) return false;
   const admin = getSupabaseAdmin();
-  const startOfDayIso = new Date(
-    new Date().setHours(0, 0, 0, 0),
-  ).toISOString();
   const { count } = await admin
     .from("campaign_leads")
     .select("id", { count: "exact", head: true })
     .eq("campaign_id", campaign.id)
-    .gte("last_sent_at", startOfDayIso);
+    .gte("last_sent_at", startOfDayInTimezone(campaign.schedule?.timezone));
   return (count ?? 0) >= campaign.daily_limit;
+}
+
+/** Tagesanfang (00:00) in der Kampagnen-Zeitzone als ISO-Zeitpunkt —
+ *  das Tageslimit soll um Mitternacht lokaler Zeit zurücksetzen, nicht UTC. */
+function startOfDayInTimezone(timezone?: string): string {
+  const tz = timezone || "Europe/Vienna";
+  try {
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+    }).formatToParts(now);
+    const h = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10) % 24;
+    const m = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
+    const s = parseInt(parts.find((p) => p.type === "second")?.value ?? "0", 10);
+    const sinceMidnightMs = ((h * 60 + m) * 60 + s) * 1000;
+    return new Date(now.getTime() - sinceMidnightMs).toISOString();
+  } catch {
+    return new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+  }
 }
 
 /** Summe der heute bereits versendeten Mails über ALLE aktiven Postfächer des Users. */
@@ -508,14 +597,27 @@ async function incrementCampaignCounter(
  * Ersetzt http(s)-Links im HTML durch /api/track/click/<token>?u=…
  * Der Endpoint zählt den Klick und leitet auf die Original-URL weiter.
  * mailto:- und bereits getrackte Links (…/api/track/…) bleiben unangetastet.
+ * Berücksichtigt einfach- wie doppelt-gequotete hrefs (HTML-Signaturen!) und
+ * dekodiert HTML-Entities (&amp;) vor dem URL-Encoding, damit Query-Parameter
+ * nach dem Redirect intakt sind.
  */
 function rewriteLinksForClickTracking(
   html: string,
   baseUrl: string,
   token: string,
 ): string {
-  return html.replace(/href="(https?:\/\/[^"]+)"/gi, (match, url: string) => {
-    if (url.startsWith(`${baseUrl}/api/track/`)) return match; // nicht doppelt tracken
-    return `href="${baseUrl}/api/track/click/${token}?u=${encodeURIComponent(url)}"`;
-  });
+  return html.replace(
+    /href=("(https?:\/\/[^"]+)"|'(https?:\/\/[^']+)')/gi,
+    (match, _full: string, dq: string | undefined, sq: string | undefined) => {
+      const raw = dq ?? sq ?? "";
+      if (raw.startsWith(`${baseUrl}/api/track/`)) return match; // nicht doppelt tracken
+      const url = raw
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'");
+      return `href="${baseUrl}/api/track/click/${token}?u=${encodeURIComponent(url)}"`;
+    },
+  );
 }

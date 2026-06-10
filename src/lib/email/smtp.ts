@@ -17,6 +17,8 @@ interface SendEmailOptions {
   subject: string;
   htmlBody: string;
   replyTo?: string;
+  /** Zusätzliche Mail-Header (z. B. List-Unsubscribe) */
+  headers?: Record<string, string>;
 }
 
 function createTransport(creds: SmtpCredentials) {
@@ -46,6 +48,7 @@ export async function sendEmail(
     subject: options.subject,
     html: options.htmlBody,
     replyTo: options.replyTo,
+    headers: options.headers,
   });
 }
 

@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, ArrowRight, Loader2, Rocket, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Loader2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -18,6 +18,8 @@ import { StepReview } from "./StepReview";
 import {
   STEPS,
   buildAutoSteps,
+  buildDefaultPrompt,
+  type BrandInfo,
   type WizardState,
 } from "./types";
 
@@ -38,11 +40,9 @@ const INITIAL_STATE: WizardState = {
     senderEmail: "",
     replyTo: "",
     language: "de-AT",
-    tone: "professional",
   },
   audience: {
     selectedLeadIds: new Set<string>(),
-    excludeContacted: true,
   },
   sequence: {
     systemPrompt: "",
@@ -69,6 +69,37 @@ export function CampaignWizard() {
   const [current, setCurrent] = useState(0);
   const [completed, setCompleted] = useState<Set<number>>(new Set());
   const [submitting, setSubmitting] = useState(false);
+  const [brand, setBrand] = useState<BrandInfo>({
+    companyName: null, offering: null, valueProp: null, targetCustomer: null,
+  });
+  const promptTouched = useRef(false);
+
+  /* Firmenprofil laden → KI-Briefing vorbefüllen, solange der/die User:in
+   * noch nichts eigenes geschrieben hat. */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/settings");
+        if (!res.ok) return;
+        const json = await res.json();
+        const b = (json.data?.brand_settings ?? {}) as Record<string, string | undefined>;
+        const info: BrandInfo = {
+          companyName:    b.company_name?.trim() || null,
+          offering:       b.offering?.trim() || null,
+          valueProp:      b.value_prop?.trim() || null,
+          targetCustomer: b.target_customer?.trim() || null,
+        };
+        if (cancelled) return;
+        setBrand(info);
+        setState((s) => {
+          if (promptTouched.current || s.sequence.systemPrompt.trim()) return s;
+          return { ...s, sequence: { ...s.sequence, systemPrompt: buildDefaultPrompt(info) } };
+        });
+      } catch { /* silent — Default-Prompt bleibt leer */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const isReview = current === REVIEW_INDEX;
   const progressPct = ((current + (isReview ? 1 : 0)) / TOTAL_STEPS) * 100;
@@ -139,6 +170,11 @@ export function CampaignWizard() {
   }
 
   async function launch() {
+    if (state.audience.selectedLeadIds.size === 0) {
+      toast.error("Bitte mindestens eine:n Empfänger:in auswählen");
+      setCurrent(2);
+      return;
+    }
     setSubmitting(true);
     try {
       await submitCampaign({ asDraft: false });
@@ -166,7 +202,7 @@ export function CampaignWizard() {
       mailbox_id: state.mailbox.mailboxId,
       sender_name: state.basics.senderName,
       language: state.basics.language,
-      tone: state.basics.tone,
+      tone: "professional",
       system_prompt: state.sequence.systemPrompt,
       // Steps werden automatisch aus der Mail-Anzahl abgeleitet (kein Micro-Tuning).
       sequence_steps: buildAutoSteps(state.sequence.mailCount),
@@ -238,18 +274,36 @@ export function CampaignWizard() {
           </div>
         </div>
 
-        {/* Step body — Mailbox-Step vertikal zentriert (wenig Inhalt) */}
-        <div className={cn("wiz-body", current === 0 && "wiz-body--center")}>
+        {/* Step body — Mailbox-Step vertikal zentriert (wenig Inhalt),
+            Empfänger-Step breiter (Tabelle) */}
+        <div className={cn(
+          "wiz-body",
+          current === 0 && "wiz-body--center",
+          current === 2 && "wiz-body--wide",
+        )}>
           {current === 0 && <StepMailbox  state={state.mailbox}  onChange={setMailbox} />}
-          {current === 1 && <StepBasics   state={state.basics}   onChange={(b) => setState((s) => ({ ...s, basics: b }))} />}
-          {current === 2 && <StepAudience state={state.audience} onChange={(a) => setState((s) => ({ ...s, audience: a }))} />}
+          {current === 1 && (
+            <StepBasics
+              state={state.basics}
+              onChange={(b) => setState((s) => ({ ...s, basics: b }))}
+              companyName={brand.companyName}
+            />
+          )}
+          {current === 2 && (
+            <StepAudience
+              state={state.audience}
+              onChange={(a) => setState((s) => ({ ...s, audience: a }))}
+            />
+          )}
           {current === 3 && (
             <StepSequence
               state={state.sequence}
-              onChange={(q) => setState((s) => ({ ...s, sequence: q }))}
+              onChange={(q) => {
+                if (q.systemPrompt !== state.sequence.systemPrompt) promptTouched.current = true;
+                setState((s) => ({ ...s, sequence: q }));
+              }}
               preview={{
                 leadId: Array.from(state.audience.selectedLeadIds)[0] ?? null,
-                tone: state.basics.tone,
                 language: state.basics.language,
                 senderName: state.basics.senderName,
               }}
@@ -295,11 +349,8 @@ export function CampaignWizard() {
               onClick={launch}
               disabled={submitting}
               className="h-9 gap-1.5"
-              style={{ background: "var(--success)" }}
             >
-              {submitting
-                ? <Loader2 className="h-4 w-4 animate-spin" />
-                : <Rocket className="h-4 w-4" strokeWidth={1.75} />}
+              {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
               Kampagne starten
             </Button>
           )}

@@ -57,7 +57,7 @@ export const PLANS: Record<Exclude<PlanKey, "enterprise">, PlanDef> = {
       "6.000 Credits / Monat",
       "5 Seats · 10 Mailboxen",
       "Alles aus Solo",
-      "LinkedIn-Outreach (Unipile)",
+      "LinkedIn-Outreach",
       "A/B-Tests & Sequenzen",
       "SEO-Posts (10/Monat)",
       "Priority Support (4h)",

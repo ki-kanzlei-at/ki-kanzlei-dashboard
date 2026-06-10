@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import {
@@ -20,7 +20,6 @@ import {
   AlertTriangle,
   Flame,
   TrendingUp,
-  Check,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -54,17 +53,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
-  Command,
-  CommandInput,
-  CommandList,
-  CommandEmpty,
-  CommandItem,
-} from "@/components/ui/command";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
+import { FilterTriggerPopover } from "@/components/shared/FilterTriggerPopover";
 
-import { CampaignCreateDialog } from "@/components/campaigns/CampaignCreateDialog";
 import type { Campaign, CampaignStatus } from "@/types/campaigns";
 import { cn } from "@/lib/utils";
 
@@ -83,7 +84,7 @@ interface EmailAccountSummary {
   health_status: string;
 }
 
-/* ── Status-Labels & Sort-Reihenfolge ── */
+/* ── Status-Labels ── */
 const STATUS_LABEL: Record<CampaignStatus, string> = {
   active:    "Aktiv",
   paused:    "Pausiert",
@@ -101,6 +102,13 @@ const STATUS_TABS: { value: "all" | CampaignStatus; label: string }[] = [
 ];
 
 const PAGE_SIZE = 25;
+
+const RANGE_OPTIONS = [
+  { value: "7d",   label: "Letzte 7 Tage" },
+  { value: "30d",  label: "Letzte 30 Tage" },
+  { value: "90d",  label: "Letzte 90 Tage" },
+  { value: "ytd",  label: "Dieses Jahr" },
+];
 
 /* ── Helpers ── */
 function pct(n: number, total: number): number {
@@ -129,76 +137,10 @@ function relativeDate(iso: string | null | undefined): string {
   return `vor ${Math.floor(days / 30)} Monaten`;
 }
 
-/* ── Filter-Trigger (gleicher Stil wie Leads v3) ── */
-interface FilterTriggerProps {
-  label: string;
-  value: string | null;
-  onClear: () => void;
-  selectValue: string;
-  onSelectChange: (value: string) => void;
-  options: { value: string; label: string }[];
-}
-
-function FilterTriggerPopover({
-  label,
-  value,
-  onClear,
-  selectValue,
-  onSelectChange,
-  options,
-}: FilterTriggerProps) {
-  const hasValue = !!value;
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button type="button" className={cn("filter-trigger", hasValue && "has-value")}>
-          {!hasValue && <Plus className="h-3 w-3" strokeWidth={1.75} />}
-          <span className="lbl">{label}</span>
-          {hasValue && <span className="val">{value}</span>}
-          {hasValue && (
-            <span
-              role="button"
-              tabIndex={0}
-              aria-label={`${label} entfernen`}
-              className="x-btn"
-              onClick={(e) => { e.stopPropagation(); onClear(); }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); onClear(); }
-              }}
-            >
-              <X className="h-2.5 w-2.5" strokeWidth={1.75} />
-            </span>
-          )}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[240px] p-0" align="start">
-        <Command>
-          <CommandInput placeholder={`${label} suchen…`} className="h-9 text-[13px]" />
-          <CommandList className="max-h-[260px] overflow-y-auto overscroll-contain">
-            <CommandEmpty className="py-4 text-center text-[12px] text-muted-foreground">
-              Kein Eintrag gefunden
-            </CommandEmpty>
-            {options.map((opt) => {
-              const selected = selectValue === opt.value;
-              return (
-                <CommandItem
-                  key={opt.value}
-                  value={opt.label}
-                  onSelect={() => onSelectChange(opt.value)}
-                  className="text-[13px] cursor-pointer"
-                >
-                  <Check
-                    className={cn("mr-2 h-3.5 w-3.5", selected ? "opacity-100" : "opacity-0")}
-                  />
-                  {opt.label}
-                </CommandItem>
-              );
-            })}
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
-  );
+/** Liest die Fehlermeldung aus einer API-Antwort (Fallback auf Standardtext). */
+async function apiError(res: Response, fallback: string): Promise<string> {
+  const data = await res.json().catch(() => null);
+  return (data?.error as string | undefined) || fallback;
 }
 
 /* ── Rate-Cell ── */
@@ -252,6 +194,28 @@ function buildPageNumbers(current: number, total: number): (number | "…")[] {
   return [1, "…", current - 1, current, current + 1, "…", total];
 }
 
+/* ── CSV-Export der aktuell geladenen Kampagnen ── */
+function exportCsv(campaigns: Campaign[]) {
+  const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const rows = [
+    ["Name", "Status", "Empfänger", "Gesendet", "Geöffnet", "Geklickt", "Antworten", "Bounces", "Erstellt"],
+    ...campaigns.map((c) => [
+      c.name, STATUS_LABEL[c.status], c.total_count, c.sent_count,
+      c.open_count, c.click_count, c.reply_count, c.bounce_count,
+      new Date(c.created_at).toLocaleDateString("de-AT"),
+    ]),
+  ];
+  const csv = rows.map((r) => r.map(esc).join(";")).join("\r\n");
+  // BOM, damit Excel Umlaute korrekt erkennt
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `kampagnen-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 /* ══════════════════════════════════════════════════════════════
    Hauptkomponente
    ══════════════════════════════════════════════════════════════ */
@@ -262,13 +226,15 @@ export default function CampaignsPage() {
   const [loading, setLoading]       = useState(true);
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | CampaignStatus>("all");
-  const [goalFilter,   setGoalFilter]   = useState<string>("all");
-  const [senderFilter, setSenderFilter] = useState<string>("all");
   const [rangeFilter,  setRangeFilter]  = useState<string>("all");
-  const [createOpen, setCreateOpen] = useState(false);
   const [emailAccounts, setEmailAccounts] = useState<EmailAccountSummary[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
+  const [pendingDelete, setPendingDelete] = useState<string[] | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   /* ── Fetch E-Mail-Accounts (für Warmup-Strip) ── */
   useEffect(() => {
@@ -282,30 +248,36 @@ export default function CampaignsPage() {
     })();
   }, []);
 
-  /* ── Fetch Kampagnen ── */
+  /* ── Fetch Kampagnen (serverseitig paginiert & gefiltert) ── */
   const fetchCampaigns = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: String(PAGE_SIZE),
+      });
       if (searchFilter) params.set("search", searchFilter);
       if (statusFilter !== "all") params.set("status", statusFilter);
-      if (goalFilter !== "all")   params.set("goal", goalFilter);
-      if (senderFilter !== "all") params.set("sender", senderFilter);
       if (rangeFilter !== "all")  params.set("range", rangeFilter);
 
       const res = await fetch(`/api/campaigns?${params.toString()}`);
-      if (!res.ok) throw new Error();
+      if (!res.ok) throw new Error(await apiError(res, "Kampagnen konnten nicht geladen werden"));
       const json = await res.json();
       setCampaigns(json.data ?? []);
-    } catch {
-      // 404/Backend noch nicht fertig → leere Liste statt Fehlertoast
+      setTotalCount(json.count ?? 0);
+      setTotalPages(Math.max(1, json.totalPages ?? 1));
+      if (json.status_counts) setStatusCounts(json.status_counts);
+    } catch (err) {
       setCampaigns([]);
+      setTotalCount(0);
+      setTotalPages(1);
+      toast.error(err instanceof Error ? err.message : "Kampagnen konnten nicht geladen werden");
     } finally {
       setLoading(false);
     }
-  }, [searchFilter, statusFilter, goalFilter, senderFilter, rangeFilter]);
+  }, [page, searchFilter, statusFilter, rangeFilter]);
 
-  /* Debounce für Suchfeld (500ms), sonst sofort */
+  /* Debounce (Suchfeld); Filter-/Seitenwechsel laufen über dieselbe Leitung */
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -313,65 +285,15 @@ export default function CampaignsPage() {
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [fetchCampaigns]);
 
-  /* ── Filter-Optionen (clientseitig aus geladenen Daten ableiten) ── */
-  const goalOptions = useMemo(() => {
-    const set = new Set<string>();
-    campaigns.forEach((c) => { if (c.goal) set.add(c.goal); });
-    return Array.from(set).map((g) => ({ value: g, label: g }));
-  }, [campaigns]);
+  /* Filterwechsel → zurück auf Seite 1 */
+  useEffect(() => { setPage(1); }, [statusFilter, rangeFilter, searchFilter]);
 
-  const senderOptions = useMemo(() => {
-    const set = new Set<string>();
-    campaigns.forEach((c) => {
-      if (c.sender_name) set.add(c.sender_name);
-      else if (c.reply_to) set.add(c.reply_to);
-    });
-    return Array.from(set).map((s) => ({ value: s, label: s }));
-  }, [campaigns]);
-
-  const rangeOptions = [
-    { value: "7d",   label: "Letzte 7 Tage" },
-    { value: "30d",  label: "Letzte 30 Tage" },
-    { value: "90d",  label: "Letzte 90 Tage" },
-    { value: "ytd",  label: "Dieses Jahr" },
-  ];
-
-  /* ── Status-Zählung (für Tab-Counts) ── */
-  const statusCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: campaigns.length };
-    for (const s of ["active","paused","draft","completed"] as CampaignStatus[]) {
-      counts[s] = campaigns.filter((c) => c.status === s).length;
-    }
-    return counts;
-  }, [campaigns]);
-
-  /* ── Status-Filter im Frontend anwenden (verhindert Round-Trip beim Tab-Wechsel) ── */
-  const filteredCampaigns = useMemo(() => {
-    if (statusFilter === "all") return campaigns;
-    return campaigns.filter((c) => c.status === statusFilter);
-  }, [campaigns, statusFilter]);
-
-  /* ── Pagination derived ── */
-  const totalPages = Math.max(1, Math.ceil(filteredCampaigns.length / PAGE_SIZE));
   const pageNumbers = buildPageNumbers(page, totalPages);
-  const visibleCampaigns = useMemo(
-    () => filteredCampaigns.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-    [filteredCampaigns, page],
-  );
-  useEffect(() => { setPage(1); }, [statusFilter, goalFilter, senderFilter, rangeFilter, searchFilter]);
-
-  const hasFilters =
-    !!searchFilter ||
-    statusFilter !== "all" ||
-    goalFilter !== "all" ||
-    senderFilter !== "all" ||
-    rangeFilter !== "all";
+  const hasFilters = !!searchFilter || statusFilter !== "all" || rangeFilter !== "all";
 
   function resetFilters() {
     setSearchFilter("");
     setStatusFilter("all");
-    setGoalFilter("all");
-    setSenderFilter("all");
     setRangeFilter("all");
   }
 
@@ -383,7 +305,7 @@ export default function CampaignsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) throw new Error(await apiError(res, "Statuswechsel fehlgeschlagen"));
       toast.success(
         status === "active"
           ? "Kampagne gestartet"
@@ -395,36 +317,82 @@ export default function CampaignsPage() {
     }
   }
 
-  async function handleDelete(id: string) {
+  async function handleDuplicate(id: string) {
     try {
-      const res = await fetch(`/api/campaigns/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error();
-      toast.success("Kampagne gelöscht");
+      const res = await fetch(`/api/campaigns/${id}/duplicate`, { method: "POST" });
+      if (!res.ok) throw new Error(await apiError(res, "Duplizieren fehlgeschlagen"));
+      toast.success("Kampagne als Entwurf dupliziert");
       fetchCampaigns();
-    } catch {
-      toast.error("Fehler beim Löschen");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Fehler");
     }
+  }
+
+  async function confirmDelete() {
+    if (!pendingDelete || pendingDelete.length === 0) return;
+    setBulkBusy(true);
+    let deleted = 0;
+    for (const id of pendingDelete) {
+      try {
+        const res = await fetch(`/api/campaigns/${id}`, { method: "DELETE" });
+        if (res.ok) deleted++;
+      } catch { /* einzeln weiter */ }
+    }
+    setBulkBusy(false);
+    setPendingDelete(null);
+    setSelected(new Set());
+    if (deleted > 0) {
+      toast.success(deleted === 1 ? "Kampagne gelöscht" : `${deleted} Kampagnen gelöscht`);
+    } else {
+      toast.error("Löschen fehlgeschlagen");
+    }
+    fetchCampaigns();
+  }
+
+  /** Bulk: Status für alle ausgewählten Kampagnen setzen / duplizieren. */
+  async function bulkAction(action: "pause" | "start" | "duplicate") {
+    if (selected.size === 0) return;
+    setBulkBusy(true);
+    let ok = 0;
+    for (const id of selected) {
+      try {
+        const res = action === "duplicate"
+          ? await fetch(`/api/campaigns/${id}/duplicate`, { method: "POST" })
+          : await fetch(`/api/campaigns/${id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ status: action === "pause" ? "paused" : "active" }),
+            });
+        if (res.ok) ok++;
+      } catch { /* einzeln weiter */ }
+    }
+    setBulkBusy(false);
+    setSelected(new Set());
+    toast.success(
+      action === "pause"     ? `${ok} Kampagnen pausiert` :
+      action === "start"     ? `${ok} Kampagnen gestartet` :
+      `${ok} Kampagnen dupliziert`,
+    );
+    fetchCampaigns();
   }
 
   /* ── Selection ── */
   const allVisibleSelected =
-    visibleCampaigns.length > 0 &&
-    visibleCampaigns.every((c) => selected.has(c.id));
+    campaigns.length > 0 &&
+    campaigns.every((c) => selected.has(c.id));
   function toggleOne(id: string) {
     const next = new Set(selected);
     if (next.has(id)) next.delete(id); else next.add(id);
     setSelected(next);
   }
   function toggleAll() {
+    const next = new Set(selected);
     if (allVisibleSelected) {
-      const next = new Set(selected);
-      visibleCampaigns.forEach((c) => next.delete(c.id));
-      setSelected(next);
+      campaigns.forEach((c) => next.delete(c.id));
     } else {
-      const next = new Set(selected);
-      visibleCampaigns.forEach((c) => next.add(c.id));
-      setSelected(next);
+      campaigns.forEach((c) => next.add(c.id));
     }
+    setSelected(next);
   }
 
   /* ── Render ── */
@@ -553,7 +521,7 @@ export default function CampaignsPage() {
             <div className="relative w-72">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60 pointer-events-none" strokeWidth={1.75} />
               <Input
-                placeholder="Kampagne, Absender, Ziel …"
+                placeholder="Kampagne suchen …"
                 className="pl-9 h-8 text-[13px] bg-card"
                 value={searchFilter}
                 onChange={(e) => setSearchFilter(e.target.value)}
@@ -571,28 +539,12 @@ export default function CampaignsPage() {
 
             <div className="flex items-center gap-2 flex-wrap">
               <FilterTriggerPopover
-                label="Ziel"
-                value={goalFilter !== "all" ? goalFilter : null}
-                onClear={() => setGoalFilter("all")}
-                selectValue={goalFilter}
-                onSelectChange={setGoalFilter}
-                options={goalOptions}
-              />
-              <FilterTriggerPopover
-                label="Absender:in"
-                value={senderFilter !== "all" ? senderFilter : null}
-                onClear={() => setSenderFilter("all")}
-                selectValue={senderFilter}
-                onSelectChange={setSenderFilter}
-                options={senderOptions}
-              />
-              <FilterTriggerPopover
                 label="Zeitraum"
-                value={rangeFilter !== "all" ? (rangeOptions.find((o) => o.value === rangeFilter)?.label ?? rangeFilter) : null}
+                value={rangeFilter !== "all" ? (RANGE_OPTIONS.find((o) => o.value === rangeFilter)?.label ?? rangeFilter) : null}
                 onClear={() => setRangeFilter("all")}
                 selectValue={rangeFilter}
                 onSelectChange={setRangeFilter}
-                options={rangeOptions}
+                options={RANGE_OPTIONS}
               />
               {hasFilters && (
                 <button
@@ -608,11 +560,17 @@ export default function CampaignsPage() {
             <div className="ml-auto flex items-center gap-3">
               <span className="text-[12.5px] text-muted-foreground">
                 <b className="text-foreground font-semibold">
-                  {filteredCampaigns.length.toLocaleString("de-DE")}
+                  {totalCount.toLocaleString("de-DE")}
                 </b>{" "}
                 Kampagnen
               </span>
-              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs font-medium">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-xs font-medium"
+                onClick={() => exportCsv(campaigns)}
+                disabled={campaigns.length === 0}
+              >
                 <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
                 Export
               </Button>
@@ -626,7 +584,7 @@ export default function CampaignsPage() {
                 <Skeleton key={i} className="h-14 w-full rounded-md" />
               ))}
             </div>
-          ) : filteredCampaigns.length === 0 ? (
+          ) : campaigns.length === 0 ? (
             <Empty className="py-20 border-0">
               <EmptyHeader>
                 <EmptyMedia variant="icon">
@@ -672,20 +630,17 @@ export default function CampaignsPage() {
                       <th className="text-left font-medium text-muted-foreground px-4 py-2.5 text-[11.5px] uppercase tracking-wide w-44">Versendet</th>
                       <th className="text-left font-medium text-muted-foreground px-4 py-2.5 text-[11.5px] uppercase tracking-wide w-28">Öffnungsrate</th>
                       <th className="text-left font-medium text-muted-foreground px-4 py-2.5 text-[11.5px] uppercase tracking-wide w-28">Antwortrate</th>
-                      <th className="text-left font-medium text-muted-foreground px-4 py-2.5 text-[11.5px] uppercase tracking-wide w-28">Konvertiert</th>
                       <th className="text-left font-medium text-muted-foreground px-4 py-2.5 text-[11.5px] uppercase tracking-wide w-40">Letzte Aktivität</th>
                       <th className="w-28 pr-3" />
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleCampaigns.map((c) => {
+                    {campaigns.map((c) => {
                       const audience = c.total_count || 0;
                       const sent     = c.sent_count  || 0;
                       const sentPct  = pct(sent, audience);
                       const openPct  = pct(c.open_count || 0, sent || 1);
                       const replyPct = pct(c.reply_count || 0, sent || 1);
-                      const conv     = c.conversion_count ?? 0;
-                      const convPct  = pct(conv, sent || 1);
                       const isSelected = selected.has(c.id);
 
                       const lastWhen = c.last_activity_at
@@ -718,7 +673,6 @@ export default function CampaignsPage() {
                             <div className="flex flex-col gap-0">
                               <div className="co-name">{c.name}</div>
                               <div className="cmp-meta-row">
-                                {c.goal && <><span>{c.goal}</span><span className="sep" /></>}
                                 <span>
                                   <Layers className="inline-block h-3 w-3 mr-1 -mt-0.5" strokeWidth={1.75} />
                                   {c.steps ?? 1} {(c.steps ?? 1) === 1 ? "Schritt" : "Schritte"}
@@ -731,7 +685,7 @@ export default function CampaignsPage() {
                                 {c.error_message && (
                                   <>
                                     <span className="sep" />
-                                    <span className="inline-flex items-center gap-1 text-destructive">
+                                    <span className="inline-flex items-center gap-1 text-destructive" title={c.error_message}>
                                       <AlertTriangle className="h-3 w-3" strokeWidth={1.75} />
                                       Fehler
                                     </span>
@@ -768,16 +722,6 @@ export default function CampaignsPage() {
                             {sent === 0 ? <span className="meta">—</span> : <RateCell value={replyPct} />}
                           </td>
                           <td className="px-4 py-3.5 align-middle">
-                            {sent === 0 ? (
-                              <span className="meta">—</span>
-                            ) : (
-                              <span style={{ fontWeight: 500 }}>
-                                {conv}
-                                <span className="meta" style={{ marginLeft: 4 }}>· {convPct}%</span>
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3.5 align-middle">
                             <LastActivityCell when={lastWhen} kind={lastKind} />
                           </td>
                           <td className="px-3 py-3.5 align-middle text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
@@ -808,6 +752,7 @@ export default function CampaignsPage() {
                                   size="icon"
                                   className="h-8 w-8 text-muted-foreground hover:text-foreground"
                                   title="Duplizieren"
+                                  onClick={() => handleDuplicate(c.id)}
                                 >
                                   <Copy className="h-4 w-4" strokeWidth={1.75} />
                                 </Button>
@@ -816,7 +761,7 @@ export default function CampaignsPage() {
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                                title="Bearbeiten"
+                                title="Details öffnen"
                                 onClick={() => router.push(`/dashboard/campaigns/${c.id}`)}
                               >
                                 <Pencil className="h-4 w-4" strokeWidth={1.75} />
@@ -831,13 +776,13 @@ export default function CampaignsPage() {
                                   <DropdownMenuItem onClick={() => router.push(`/dashboard/campaigns/${c.id}`)}>
                                     Details öffnen
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleDuplicate(c.id)}>
                                     <Copy className="h-4 w-4 mr-2" /> Duplizieren
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem
                                     variant="destructive"
-                                    onClick={() => handleDelete(c.id)}
+                                    onClick={() => setPendingDelete([c.id])}
                                   >
                                     <Trash2 className="h-4 w-4 mr-2" /> Löschen
                                   </DropdownMenuItem>
@@ -857,15 +802,15 @@ export default function CampaignsPage() {
               <div className="px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
                 <p className="text-sm text-muted-foreground whitespace-nowrap">
                   <span className="font-medium text-foreground">
-                    {filteredCampaigns.length === 0
+                    {totalCount === 0
                       ? 0
                       : ((page - 1) * PAGE_SIZE + 1).toLocaleString("de-DE")}
                     –
-                    {Math.min(page * PAGE_SIZE, filteredCampaigns.length).toLocaleString("de-DE")}
+                    {Math.min(page * PAGE_SIZE, totalCount).toLocaleString("de-DE")}
                   </span>{" "}
                   von{" "}
                   <span className="font-medium text-foreground">
-                    {filteredCampaigns.length.toLocaleString("de-DE")}
+                    {totalCount.toLocaleString("de-DE")}
                   </span>
                 </p>
 
@@ -919,16 +864,33 @@ export default function CampaignsPage() {
             <b className="font-semibold">{selected.size}</b> ausgewählt
           </span>
           <span className="w-px h-4 bg-background/15 mx-1.5" />
-          <Button variant="ghost" size="sm" className="h-7 px-2.5 text-background/85 hover:text-background hover:bg-background/10 text-[12.5px]">
+          <Button
+            variant="ghost" size="sm" disabled={bulkBusy}
+            className="h-7 px-2.5 text-background/85 hover:text-background hover:bg-background/10 text-[12.5px]"
+            onClick={() => bulkAction("pause")}
+          >
             <Pause className="h-3 w-3 mr-1" /> Pausieren
           </Button>
-          <Button variant="ghost" size="sm" className="h-7 px-2.5 text-background/85 hover:text-background hover:bg-background/10 text-[12.5px]">
+          <Button
+            variant="ghost" size="sm" disabled={bulkBusy}
+            className="h-7 px-2.5 text-background/85 hover:text-background hover:bg-background/10 text-[12.5px]"
+            onClick={() => bulkAction("start")}
+          >
             <Play className="h-3 w-3 mr-1" /> Starten
           </Button>
-          <Button variant="ghost" size="sm" className="h-7 px-2.5 text-background/85 hover:text-background hover:bg-background/10 text-[12.5px]">
+          <Button
+            variant="ghost" size="sm" disabled={bulkBusy}
+            className="h-7 px-2.5 text-background/85 hover:text-background hover:bg-background/10 text-[12.5px]"
+            onClick={() => bulkAction("duplicate")}
+          >
             <Copy className="h-3 w-3 mr-1" /> Duplizieren
           </Button>
-          <Button variant="ghost" size="sm" className="h-7 px-2.5 text-red-300 hover:text-red-200 hover:bg-red-500/20 text-[12.5px]">
+          <Button
+            variant="ghost" size="sm" disabled={bulkBusy}
+            className="h-7 px-2.5 text-red-300 hover:text-red-200 hover:bg-red-500/20 text-[12.5px]"
+            onClick={() => setPendingDelete(Array.from(selected))}
+            aria-label="Ausgewählte löschen"
+          >
             <Trash2 className="h-3 w-3" />
           </Button>
           <span className="w-px h-4 bg-background/15 mx-1.5" />
@@ -944,12 +906,32 @@ export default function CampaignsPage() {
         </div>
       )}
 
-      {/* ── Create Dialog ── */}
-      <CampaignCreateDialog
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-        onCreated={fetchCampaigns}
-      />
+      {/* ── Lösch-Bestätigung ── */}
+      <AlertDialog open={!!pendingDelete} onOpenChange={(open) => { if (!open) setPendingDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingDelete && pendingDelete.length > 1
+                ? `${pendingDelete.length} Kampagnen löschen?`
+                : "Kampagne löschen?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Alle zugehörigen Versand-Daten und Statistiken werden dauerhaft entfernt.
+              Diese Aktion kann nicht rückgängig gemacht werden.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkBusy}>Abbrechen</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); confirmDelete(); }}
+              disabled={bulkBusy}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              Endgültig löschen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

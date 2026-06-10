@@ -135,6 +135,32 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Keine Änderungen" }, { status: 400 });
     }
 
+    /* ── Start-Preflight: keine leeren Kampagnen aktivieren ── */
+    if (updates.status === "active") {
+      const { count } = await supabase
+        .from("campaign_leads")
+        .select("id", { count: "exact", head: true })
+        .eq("campaign_id", id)
+        .eq("user_id", user.id);
+      if ((count ?? 0) === 0) {
+        return NextResponse.json(
+          { error: "Die Kampagne hat keine Empfänger:innen — bitte zuerst Leads hinzufügen" },
+          { status: 400 },
+        );
+      }
+      const { count: mailboxCount } = await supabase
+        .from("email_accounts")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .eq("is_active", true);
+      if ((mailboxCount ?? 0) === 0) {
+        return NextResponse.json(
+          { error: "Keine aktive Mailbox verbunden — bitte zuerst ein E-Mail-Konto in den Einstellungen verbinden" },
+          { status: 400 },
+        );
+      }
+    }
+
     const campaign = await updateCampaign(id, updates, user.id);
     return NextResponse.json({ data: campaign });
   } catch (err) {

@@ -24,6 +24,8 @@ import type { PaginatedResult, PaginationOptions } from "./leads";
 export interface CampaignFilters {
   status?: CampaignStatus;
   search?: string;
+  /** Nur Kampagnen, die in den letzten N Tagen erstellt wurden */
+  createdWithinDays?: number;
 }
 
 const DEFAULT_SEQUENCE: SequenceStep[] = [
@@ -54,7 +56,12 @@ export async function getCampaigns(
     query = query.eq("status", filters.status);
   }
   if (filters.search) {
-    query = query.ilike("name", `%${filters.search}%`);
+    const cleaned = filters.search.replace(/["\\]/g, "").replace(/([%_])/g, "\\$1");
+    query = query.ilike("name", `%${cleaned}%`);
+  }
+  if (filters.createdWithinDays && filters.createdWithinDays > 0) {
+    const cutoff = new Date(Date.now() - filters.createdWithinDays * 86_400_000).toISOString();
+    query = query.gte("created_at", cutoff);
   }
 
   query = query.order("created_at", { ascending: false }).range(from, to);
@@ -74,6 +81,31 @@ export async function getCampaigns(
     pageSize,
     totalPages: Math.ceil(total / pageSize),
   };
+}
+
+/** Anzahl Kampagnen pro Status (für die Tab-Zähler der Liste). */
+export async function getCampaignStatusCounts(
+  userId: string,
+): Promise<Record<CampaignStatus | "all", number>> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("campaigns")
+    .select("status")
+    .eq("user_id", userId);
+
+  if (error) {
+    throw new Error(`Fehler beim Laden der Kampagnen-Zähler: ${error.message}`);
+  }
+
+  const counts: Record<CampaignStatus | "all", number> = {
+    all: 0, draft: 0, active: 0, paused: 0, completed: 0, archived: 0,
+  };
+  for (const row of data ?? []) {
+    const s = row.status as CampaignStatus;
+    if (s in counts) counts[s]++;
+    counts.all++;
+  }
+  return counts;
 }
 
 export async function getCampaignById(
@@ -111,8 +143,11 @@ export async function createCampaign(
   const tracking = { ...DEFAULT_TRACKING, ...(input.tracking ?? {}) };
   const startsActive = input.status === "active";
   const initialNextSend = startsActive ? new Date().toISOString() : null;
+  const leadIds = Array.from(new Set(input.lead_ids));
 
   // 1. Kampagne erstellen
+  // reply_to: leer lassen wenn nicht gesetzt — der Versand fällt dann auf die
+  // Antwort-Adresse des sendenden Postfachs zurück (kein globaler Default!).
   const { data: campaign, error } = await supabase
     .from("campaigns")
     .insert({
@@ -120,7 +155,7 @@ export async function createCampaign(
       name:               input.name,
       daily_limit:        input.daily_limit  ?? 200,
       delay_minutes:      input.delay_minutes ?? 8,
-      reply_to:           input.reply_to     ?? "info@ki-kanzlei.at",
+      reply_to:           input.reply_to     ?? "",
       mailbox_id:         input.mailbox_id   ?? null,
       sender_name:        input.sender_name  ?? null,
       goal:               input.goal         ?? null,
@@ -134,7 +169,7 @@ export async function createCampaign(
       auto_stop_on_reply: input.auto_stop_on_reply ?? true,
       steps_total:        sequenceSteps.length,
       status:             input.status ?? "draft",
-      total_count:        input.lead_ids.length,
+      total_count:        leadIds.length,
       started_at:         startsActive ? new Date().toISOString() : null,
     })
     .select()
@@ -145,8 +180,8 @@ export async function createCampaign(
   }
 
   // 2. Campaign Leads erstellen
-  if (input.lead_ids.length > 0) {
-    const campaignLeads = input.lead_ids.map((lead_id) => ({
+  if (leadIds.length > 0) {
+    const campaignLeads = leadIds.map((lead_id) => ({
       campaign_id: campaign.id,
       lead_id,
       user_id: userId,
@@ -183,7 +218,19 @@ export async function updateCampaign(
 
   // Timestamps für Statuswechsel
   if (data.status === "active") {
-    updatePayload.started_at = new Date().toISOString();
+    // started_at nur beim ERSTEN Start setzen (Pause→Resume darf das
+    // Startdatum nicht überschreiben); alte Fehlermeldung zurücksetzen.
+    const { data: existing } = await supabase
+      .from("campaigns")
+      .select("started_at")
+      .eq("id", id)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!existing?.started_at) {
+      updatePayload.started_at = new Date().toISOString();
+    }
+    updatePayload.error_message = null;
+    updatePayload.completed_at = null;
   } else if (data.status === "completed") {
     updatePayload.completed_at = new Date().toISOString();
   }
@@ -234,6 +281,60 @@ export async function deleteCampaign(
   }
 }
 
+/**
+ * Dupliziert eine Kampagne als neuen Entwurf: gleiche Konfiguration,
+ * gleiche Lead-Liste, alle Zähler auf 0.
+ */
+export async function duplicateCampaign(
+  id: string,
+  userId: string,
+): Promise<Campaign> {
+  const source = await getCampaignById(id, userId);
+  if (!source) {
+    throw new Error("Kampagne nicht gefunden");
+  }
+
+  const supabase = await createClient();
+
+  // Lead-IDs der Quellkampagne einsammeln (chunked, RLS-scoped)
+  const leadIds: string[] = [];
+  const CHUNK = 1000;
+  for (let offset = 0; ; offset += CHUNK) {
+    const { data, error } = await supabase
+      .from("campaign_leads")
+      .select("lead_id")
+      .eq("campaign_id", id)
+      .eq("user_id", userId)
+      .range(offset, offset + CHUNK - 1);
+    if (error) throw new Error(`Fehler beim Lesen der Kampagnen-Leads: ${error.message}`);
+    leadIds.push(...(data ?? []).map((r) => r.lead_id as string));
+    if (!data || data.length < CHUNK) break;
+  }
+
+  return createCampaign(
+    {
+      name:               `${source.name} (Kopie)`,
+      lead_ids:           leadIds,
+      daily_limit:        source.daily_limit,
+      delay_minutes:      source.delay_minutes,
+      reply_to:           source.reply_to || undefined,
+      mailbox_id:         source.mailbox_id,
+      sender_name:        source.sender_name,
+      goal:               source.goal,
+      language:           source.language,
+      tone:               source.tone,
+      system_prompt:      source.system_prompt,
+      sequence_steps:     source.sequence_steps,
+      sequence_delays:    source.sequence_delays,
+      schedule:           source.schedule,
+      tracking:           source.tracking,
+      auto_stop_on_reply: source.auto_stop_on_reply,
+      status:             "draft",
+    },
+    userId,
+  );
+}
+
 /* ───────────────────── Campaign Leads ───────────────────── */
 
 export async function getCampaignLeads(
@@ -249,14 +350,25 @@ export async function getCampaignLeads(
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
+  // !inner: erlaubt Filterung über die eingebettete leads-Relation (Suche).
+  // Jede campaign_lead-Zeile hat via FK garantiert einen Lead — semantisch
+  // ändert der Inner-Join also nichts.
   let query = supabase
     .from("campaign_leads")
-    .select("*, lead:leads(company, email, ceo_name, website, city, industry)", { count: "exact" })
+    .select("*, lead:leads!inner(company, email, ceo_name, website, city, industry)", { count: "exact" })
     .eq("campaign_id", campaignId)
     .eq("user_id", userId);
 
   if (filters.status) {
     query = query.eq("status", filters.status);
+  }
+  if (filters.search) {
+    const cleaned = filters.search.replace(/["\\]/g, "").replace(/([%_])/g, "\\$1");
+    const term = `"%${cleaned}%"`;
+    query = query.or(
+      `company.ilike.${term},email.ilike.${term},ceo_name.ilike.${term}`,
+      { referencedTable: "lead" },
+    );
   }
 
   query = query.order("created_at", { ascending: false }).range(from, to);
@@ -332,13 +444,17 @@ export async function trackClick(token: string): Promise<boolean> {
 export async function trackBounce(
   email: string,
   bounceType?: string,
+  userId?: string,
 ): Promise<boolean> {
   const admin = getSupabaseAdmin();
 
-  const { data: leads } = await admin
+  let leadQuery = admin
     .from("leads")
     .select("id")
     .eq("email", email);
+  // Mandanten-Scope: ohne userId würden Leads ALLER User matchen
+  if (userId) leadQuery = leadQuery.eq("user_id", userId);
+  const { data: leads } = await leadQuery;
 
   if (!leads || leads.length === 0) return false;
 
@@ -416,10 +532,13 @@ async function maybeApplyBounceAction(
     if (!account || !account.is_active) return; // schon aus → nichts zu tun
 
     // Bounces dieses Postfachs in den letzten 7 Tagen zählen
+    // (user-scoped — gleiche Absenderadresse bei zwei Mandanten darf sich
+    //  nicht gegenseitig über die Schwelle schieben)
     const cutoff = new Date(Date.now() - 7 * 86_400_000).toISOString();
     const { count } = await admin
       .from("campaign_leads")
       .select("id", { count: "exact", head: true })
+      .eq("user_id", camp.user_id)
       .eq("sender_email", senderEmail)
       .eq("status", "bounced")
       .gte("bounced_at", cutoff);
@@ -443,13 +562,16 @@ async function maybeApplyBounceAction(
 export async function trackReply(
   email: string,
   replyPreview?: string,
+  userId?: string,
 ): Promise<boolean> {
   const admin = getSupabaseAdmin();
 
-  const { data: leads } = await admin
+  let leadQuery = admin
     .from("leads")
     .select("id")
     .eq("email", email);
+  if (userId) leadQuery = leadQuery.eq("user_id", userId);
+  const { data: leads } = await leadQuery;
 
   if (!leads || leads.length === 0) return false;
 

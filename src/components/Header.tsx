@@ -29,9 +29,18 @@ const routeMeta: Record<string, { label: string; parent?: string }> = {
     "/dashboard/linkedin":         { label: "LinkedIn",      parent: "Dashboard" },
     "/dashboard/social-media":     { label: "Social Media",  parent: "Dashboard" },
     "/dashboard/seo":              { label: "SEO",           parent: "Dashboard" },
-    "/dashboard/email-outreach":   { label: "Emails",        parent: "Dashboard" },
     "/dashboard/settings":         { label: "Einstellungen", parent: "Dashboard" },
 };
+
+/** Meta für dynamische Routen (z. B. Kampagnen-Detail) ableiten. */
+function resolveRouteMeta(pathname: string): { label: string; parent?: string } | undefined {
+    const exact = routeMeta[pathname];
+    if (exact) return exact;
+    if (/^\/dashboard\/campaigns\/[^/]+$/.test(pathname)) {
+        return { label: "Kampagnen-Details", parent: "E-Mail-Kampagnen" };
+    }
+    return undefined;
+}
 
 function NotificationDropdown() {
     return (
@@ -73,7 +82,7 @@ function NotificationDropdown() {
 /* ── Header ── */
 export function Header() {
     const pathname = usePathname();
-    const meta = routeMeta[pathname];
+    const meta = resolveRouteMeta(pathname);
 
     return (
         <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/50 bg-background px-4 sticky top-0 z-40">

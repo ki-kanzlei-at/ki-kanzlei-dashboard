@@ -9,6 +9,10 @@ import {
   Play,
   Pause,
   CheckCircle2,
+  Clock,
+  Copy,
+  Layers,
+  Mail,
   MoreHorizontal,
   Trash2,
   Search,
@@ -52,6 +56,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 import type { Campaign, CampaignLead, CampaignLeadStatus, CampaignStatus } from "@/types/campaigns";
 
@@ -112,23 +126,30 @@ export default function CampaignDetailPage() {
   const [leadsPage, setLeadsPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState("all");
   const [searchFilter, setSearchFilter] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const fetchCampaign = useCallback(async () => {
     try {
       const res = await fetch(`/api/campaigns/${id}`);
+      if (res.status === 404) {
+        toast.error("Kampagne nicht gefunden");
+        router.push("/dashboard/campaigns");
+        return;
+      }
       if (!res.ok) throw new Error();
       const json = await res.json();
       setCampaign(json.data);
     } catch {
-      toast.error("Kampagne nicht gefunden");
-      router.push("/dashboard/campaigns");
+      // Transienter Fehler (Netz, 500) → nicht wegnavigieren, nur melden
+      toast.error("Kampagne konnte nicht geladen werden");
     } finally {
       setLoading(false);
     }
   }, [id, router]);
 
-  const fetchLeads = useCallback(async (page = 1) => {
-    setLeadsLoading(true);
+  /* silent=true beim Hintergrund-Poll: kein Skeleton-Flackern */
+  const fetchLeads = useCallback(async (page = 1, silent = false) => {
+    if (!silent) setLeadsLoading(true);
     try {
       const params = new URLSearchParams({
         page: String(page),
@@ -143,21 +164,21 @@ export default function CampaignDetailPage() {
       setLeads(json.data ?? []);
       setLeadsCount(json.count ?? 0);
     } catch {
-      toast.error("Fehler beim Laden der Leads");
+      if (!silent) toast.error("Fehler beim Laden der Leads");
     } finally {
-      setLeadsLoading(false);
+      if (!silent) setLeadsLoading(false);
     }
   }, [id, statusFilter, searchFilter]);
 
   useEffect(() => { fetchCampaign(); }, [fetchCampaign]);
   useEffect(() => { fetchLeads(1); setLeadsPage(1); }, [fetchLeads]);
 
-  // Auto-refresh for active campaigns
+  // Auto-refresh for active campaigns (silent — kein Lade-Flackern)
   useEffect(() => {
     if (campaign?.status !== "active") return;
     const interval = setInterval(() => {
       fetchCampaign();
-      fetchLeads(leadsPage);
+      fetchLeads(leadsPage, true);
     }, 15000);
     return () => clearInterval(interval);
   }, [campaign?.status, fetchCampaign, fetchLeads, leadsPage]);
@@ -185,6 +206,20 @@ export default function CampaignDetailPage() {
       router.push("/dashboard/campaigns");
     } catch {
       toast.error("Fehler beim Löschen");
+    } finally {
+      setDeleteOpen(false);
+    }
+  }
+
+  async function handleDuplicate() {
+    try {
+      const res = await fetch(`/api/campaigns/${id}/duplicate`, { method: "POST" });
+      if (!res.ok) throw new Error();
+      const json = await res.json();
+      toast.success("Kampagne als Entwurf dupliziert");
+      if (json.data?.id) router.push(`/dashboard/campaigns/${json.data.id}`);
+    } catch {
+      toast.error("Duplizieren fehlgeschlagen");
     }
   }
 
@@ -269,7 +304,11 @@ export default function CampaignDetailPage() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem variant="destructive" onClick={handleDelete}>
+              <DropdownMenuItem onClick={handleDuplicate}>
+                <Copy className="h-4 w-4 mr-2" />
+                Duplizieren
+              </DropdownMenuItem>
+              <DropdownMenuItem variant="destructive" onClick={() => setDeleteOpen(true)}>
                 <Trash2 className="h-4 w-4 mr-2" />
                 Kampagne löschen
               </DropdownMenuItem>
@@ -368,6 +407,68 @@ export default function CampaignDetailPage() {
           </Card>
         ))}
       </div>
+
+      {/* ── Einstellungen (Kurzübersicht) ── */}
+      <Card>
+        <CardHeader className="pb-0">
+          <CardTitle className="text-base font-semibold">Einstellungen</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+            <div className="flex items-start gap-2.5">
+              <Mail className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">Absender</p>
+                <p className="font-medium truncate">{campaign.sender_name || "—"}</p>
+                {campaign.reply_to && (
+                  <p className="text-xs text-muted-foreground truncate">Antworten an: {campaign.reply_to}</p>
+                )}
+              </div>
+            </div>
+            <div className="flex items-start gap-2.5">
+              <Layers className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+              <div>
+                <p className="text-xs text-muted-foreground">Sequenz</p>
+                <p className="font-medium">
+                  {campaign.steps_total} {campaign.steps_total === 1 ? "Mail" : "Mails"}
+                </p>
+                {campaign.sequence_delays.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Wartezeiten: {campaign.sequence_delays.map((d) => `${d.value} T.`).join(" · ")}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex items-start gap-2.5">
+              <Clock className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+              <div>
+                <p className="text-xs text-muted-foreground">Sendefenster</p>
+                <p className="font-medium">
+                  {campaign.schedule?.time_from ?? "09:00"} – {campaign.schedule?.time_to ?? "17:00"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {Array.isArray(campaign.schedule?.days)
+                    ? campaign.schedule.days
+                        .map((on, i) => (on ? ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"][i] : null))
+                        .filter(Boolean)
+                        .join(", ") || "—"
+                    : "—"}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start gap-2.5">
+              <Send className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+              <div>
+                <p className="text-xs text-muted-foreground">Tageslimit</p>
+                <p className="font-medium">{campaign.daily_limit} E-Mails / Tag</p>
+                <p className="text-xs text-muted-foreground">
+                  {campaign.auto_stop_on_reply ? "Auto-Stopp bei Antwort aktiv" : "Kein Auto-Stopp"}
+                </p>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* ── Leads Section ── */}
       <Card>
@@ -534,6 +635,28 @@ export default function CampaignDetailPage() {
           </>
         )}
       </Card>
+
+      {/* ── Lösch-Bestätigung ── */}
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Kampagne &bdquo;{campaign.name}&ldquo; löschen?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Alle zugehörigen Versand-Daten und Statistiken werden dauerhaft entfernt.
+              Diese Aktion kann nicht rückgängig gemacht werden.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Abbrechen</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); handleDelete(); }}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              Endgültig löschen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

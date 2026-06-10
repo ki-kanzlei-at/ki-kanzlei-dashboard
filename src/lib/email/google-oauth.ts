@@ -14,6 +14,9 @@ const GMAIL_SEND_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/
 const SCOPES = [
   "openid", "email", "profile",
   "https://www.googleapis.com/auth/gmail.send",
+  // Posteingang lesen: nötig für Antwort-Erkennung (Auto-Stop) & Bounce-Sync.
+  // Bestandskonten ohne diesen Scope müssen einmal neu verbunden werden.
+  "https://www.googleapis.com/auth/gmail.readonly",
 ].join(" ");
 
 export function isGoogleOAuthConfigured(): boolean {
@@ -95,7 +98,14 @@ function encodeWord(value: string): string {
   return `=?UTF-8?B?${Buffer.from(value, "utf-8").toString("base64")}?=`;
 }
 
-interface SendOptions { to: string; subject: string; htmlBody: string; replyTo?: string }
+interface SendOptions {
+  to: string;
+  subject: string;
+  htmlBody: string;
+  replyTo?: string;
+  /** Zusätzliche Mail-Header (z. B. List-Unsubscribe) */
+  headers?: Record<string, string>;
+}
 
 /** Versand über die Gmail API (Auto-Refresh).
  *  Mit send_as_email (Shared-/Alias): aus dieser Adresse senden — sie muss als
@@ -108,11 +118,15 @@ export async function sendViaGoogleOAuth(account: EmailAccount, options: SendOpt
     : fromAddress;
   const replyTo = options.replyTo || account.reply_to || undefined;
 
+  const extraHeaders = Object.entries(options.headers ?? {})
+    // CRLF-Injection verhindern — Headerwerte dürfen keine Zeilenumbrüche enthalten
+    .map(([k, v]) => `${k}: ${String(v).replace(/[\r\n]/g, " ")}`);
   const headers = [
     `From: ${from}`,
     `To: ${options.to}`,
     `Subject: ${encodeWord(options.subject)}`,
     replyTo ? `Reply-To: ${replyTo}` : "",
+    ...extraHeaders,
     "MIME-Version: 1.0",
     'Content-Type: text/html; charset="UTF-8"',
     "Content-Transfer-Encoding: base64",
@@ -130,6 +144,96 @@ export async function sendViaGoogleOAuth(account: EmailAccount, options: SendOpt
     const data = await res.json().catch(() => ({}));
     throw new Error(`Gmail send-Fehler: ${data.error?.message || res.status}`);
   }
+}
+
+/* ── Posteingang lesen (Antwort-Erkennung / Auto-Stop) ── */
+
+interface GmailInboundMessage {
+  fromEmail: string;
+  fromName: string | null;
+  subject: string | null;
+  text: string;
+  receivedAt: string;
+  messageId: string;
+}
+
+/** Zerlegt einen From-Header ("Name <mail@x>" oder "mail@x"). */
+function parseFromHeader(value: string): { email: string; name: string | null } {
+  const match = value.match(/^(.*?)<([^>]+)>\s*$/);
+  if (match) {
+    const name = match[1].replace(/^"|"$/g, "").trim();
+    return { email: match[2].trim().toLowerCase(), name: name || null };
+  }
+  return { email: value.trim().toLowerCase(), name: null };
+}
+
+/**
+ * Holt eingegangene Mails seit `since` über die Gmail API.
+ * Benötigt den gmail.readonly-Scope — Konten, die vor dessen Einführung
+ * verbunden wurden, liefern 403 und müssen neu verbunden werden (der Fehler
+ * wird im Inbox-Sync am Konto sichtbar gemacht).
+ */
+export async function fetchRecentInboundGoogle(
+  account: EmailAccount,
+  since: Date,
+  limit = 30,
+): Promise<GmailInboundMessage[]> {
+  const accessToken = await ensureAccessToken(account);
+  const afterSec = Math.floor(since.getTime() / 1000);
+
+  const listUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
+  listUrl.searchParams.set("q", `in:inbox after:${afterSec}`);
+  listUrl.searchParams.set("maxResults", String(limit));
+
+  const listRes = await fetch(listUrl.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const listData = await listRes.json().catch(() => ({}));
+  if (!listRes.ok) {
+    if (listRes.status === 403) {
+      throw new Error(
+        "Posteingang-Berechtigung fehlt — bitte das Google-Konto in den E-Mail-Einstellungen einmal neu verbinden.",
+      );
+    }
+    throw new Error(`Gmail Inbox-Fehler: ${listData.error?.message || listRes.status}`);
+  }
+
+  const ids: string[] = ((listData.messages ?? []) as Array<{ id: string }>).map((m) => m.id);
+  const out: GmailInboundMessage[] = [];
+
+  for (const id of ids) {
+    const msgUrl = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}`);
+    msgUrl.searchParams.set("format", "metadata");
+    for (const h of ["From", "Subject", "Date", "Message-ID"]) {
+      msgUrl.searchParams.append("metadataHeaders", h);
+    }
+    const msgRes = await fetch(msgUrl.toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!msgRes.ok) continue;
+    const msg = await msgRes.json().catch(() => null);
+    if (!msg) continue;
+
+    const headers = ((msg.payload?.headers ?? []) as Array<{ name: string; value: string }>);
+    const header = (name: string) =>
+      headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value ?? "";
+
+    const from = parseFromHeader(header("From"));
+    if (!from.email) continue;
+
+    out.push({
+      fromEmail: from.email,
+      fromName: from.name,
+      subject: header("Subject") || null,
+      text: (msg.snippet as string | undefined) ?? "",
+      receivedAt: msg.internalDate
+        ? new Date(Number(msg.internalDate)).toISOString()
+        : new Date().toISOString(),
+      messageId: header("Message-ID") || `gmail:${id}`,
+    });
+  }
+
+  return out;
 }
 
 /** Verbindungstest: gültiges Access-Token holen + Profil lesen. */

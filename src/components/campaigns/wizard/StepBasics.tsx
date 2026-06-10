@@ -1,48 +1,41 @@
 "use client";
 
-import { Sparkles, Globe } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import type { BasicsState, Tone } from "./types";
+import type { BasicsState } from "./types";
 
 interface StepBasicsProps {
   state: BasicsState;
   onChange: (next: BasicsState) => void;
+  /** Firmenname aus den Einstellungen — für einen echten Namensvorschlag. */
+  companyName: string | null;
 }
 
-const TONES: { value: Tone; label: string }[] = [
-  { value: "formal",       label: "Formal" },
-  { value: "professional", label: "Professionell" },
-  { value: "casual",       label: "Locker" },
-];
-
 const LANGUAGES = [
-  { value: "de-AT", label: "Deutsch (Österreich)" },
-  { value: "de-DE", label: "Deutsch (Deutschland)" },
-  { value: "de-CH", label: "Deutsch (Schweiz)" },
+  { value: "de-AT", label: "Deutsch (AT)" },
+  { value: "de-DE", label: "Deutsch (DE)" },
+  { value: "de-CH", label: "Deutsch (CH)" },
   { value: "en",    label: "Englisch" },
 ];
 
-export function StepBasics({ state, onChange }: StepBasicsProps) {
+const MONTHS = [
+  "Jänner", "Februar", "März", "April", "Mai", "Juni",
+  "Juli", "August", "September", "Oktober", "November", "Dezember",
+];
+
+export function StepBasics({ state, onChange, companyName }: StepBasicsProps) {
+  const now = new Date();
+  const namePlaceholder = `z. B. Neukunden ${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
+
   return (
     <>
       <div className="step-head">
-        <div className="step-eyebrow">
-          <Sparkles className="h-3 w-3" strokeWidth={1.75} />
-          Schritt 2 von 5
-        </div>
-        <h1 className="step-heading">Kampagnen-Basics</h1>
+        <div className="step-eyebrow">Schritt 2 von 5</div>
+        <h1 className="step-heading">Kampagne benennen</h1>
         <p className="step-desc">
-          Gib der Kampagne einen klaren Namen und wähle Sprache & Tonalität.
-          Absender und Antwort-Adresse kommen automatisch aus dem gewählten Postfach.
+          Der Name ist nur intern sichtbar. Absender und Antwort-Adresse kommen
+          aus dem gewählten Postfach.
         </p>
       </div>
 
@@ -55,14 +48,35 @@ export function StepBasics({ state, onChange }: StepBasicsProps) {
             id="campaign-name"
             value={state.name}
             onChange={(e) => onChange({ ...state, name: e.target.value })}
-            placeholder="z. B. Steuerberater AT – Frühjahr 2026"
+            placeholder={namePlaceholder}
             className="h-10"
             autoFocus
           />
+          {companyName && (
+            <p className="text-[11px] text-muted-foreground">
+              Tipp: kurz und wiedererkennbar — z. B. nach Zielgruppe oder Zeitraum.
+            </p>
+          )}
         </div>
 
         <div className="space-y-2">
-          <Label className="text-[12px] font-medium text-foreground">Absender &amp; Antwort-Adresse</Label>
+          <Label className="text-[12px] font-medium text-foreground">Sprache der E-Mails</Label>
+          <div className="pill-grid">
+            {LANGUAGES.map((l) => (
+              <button
+                key={l.value}
+                type="button"
+                className={cn("pill-item", state.language === l.value && "is-on")}
+                onClick={() => onChange({ ...state, language: l.value })}
+              >
+                {l.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-[12px] font-medium text-foreground">Absender</Label>
           <div className="rounded-[10px] border bg-muted/40 px-3.5 py-3 text-[13px]">
             <div className="flex flex-wrap items-center gap-x-2">
               <span className="font-medium text-foreground">
@@ -74,45 +88,6 @@ export function StepBasics({ state, onChange }: StepBasicsProps) {
             <div className="mt-0.5 text-[12px] text-muted-foreground">
               Antworten an: {state.replyTo || state.senderEmail || "gleiche Adresse wie Absender"}
             </div>
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            Stammt aus dem gewählten Postfach – zentral in den E-Mail-Einstellungen änderbar.
-          </p>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="language" className="text-[12px] font-medium text-foreground">
-            Sprache
-          </Label>
-          <Select
-            value={state.language}
-            onValueChange={(v) => onChange({ ...state, language: v })}
-          >
-            <SelectTrigger id="language" className="h-10 w-full">
-              <Globe className="h-4 w-4 text-muted-foreground" strokeWidth={1.75} />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {LANGUAGES.map((l) => (
-                <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="space-y-2">
-          <Label className="text-[12px] font-medium text-foreground">Tonalität</Label>
-          <div className="tone-grid">
-            {TONES.map((t) => (
-              <button
-                key={t.value}
-                type="button"
-                className={cn("tone-pill", state.tone === t.value && "is-on")}
-                onClick={() => onChange({ ...state, tone: t.value })}
-              >
-                {t.label}
-              </button>
-            ))}
           </div>
         </div>
       </div>

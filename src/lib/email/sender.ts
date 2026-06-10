@@ -11,6 +11,10 @@ interface SendOptions {
   subject: string;
   htmlBody: string;
   replyTo?: string;
+  /** Zusätzliche Mail-Header (z. B. List-Unsubscribe).
+   *  Hinweis: Microsoft Graph erlaubt über sendMail nur x-…-Header —
+   *  Standard-Header werden dort bewusst nicht gesetzt. */
+  headers?: Record<string, string>;
 }
 
 /**

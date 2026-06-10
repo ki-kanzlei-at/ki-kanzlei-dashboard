@@ -5,11 +5,32 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import type { EmailAccount } from "@/lib/supabase/email-accounts";
+import { markAccountError, type EmailAccount } from "@/lib/supabase/email-accounts";
 import { fetchInbound, type InboundEmail } from "@/lib/email/inbound";
 import { recordMessage } from "@/lib/inbox/store";
+import { trackBounce } from "@/lib/supabase/campaigns";
 
 export const maxDuration = 120;
+
+/* ── NDR-/Bounce-Erkennung ──
+ * Unzustellbarkeits-Berichte kommen von MAILER-DAEMON/postmaster-Adressen
+ * oder tragen typische Betreffzeilen. Aus dem Text wird die betroffene
+ * Empfängeradresse extrahiert und als Bounce verbucht (stoppt die Sequenz).
+ */
+const NDR_FROM = /mailer-daemon|postmaster|mail delivery (?:subsystem|system)/i;
+const NDR_SUBJECT = /undeliver|delivery (?:status notification|has failed|failure)|mail delivery failed|unzustellbar|nicht zugestellt|returned mail|failure notice/i;
+
+function isNdr(msg: InboundEmail): boolean {
+  return NDR_FROM.test(msg.fromEmail) || NDR_SUBJECT.test(msg.subject ?? "");
+}
+
+/** Extrahiert die gebouncte Empfängeradresse aus dem NDR-Text. */
+function extractBouncedRecipient(msg: InboundEmail, ownAddr: string): string | null {
+  const candidates = (msg.text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) ?? [])
+    .map((e) => e.toLowerCase())
+    .filter((e) => e !== ownAddr && !NDR_FROM.test(e));
+  return candidates[0] ?? null;
+}
 
 export async function GET(request: NextRequest) {
   /* ── Cron-Auth ── */
@@ -28,6 +49,7 @@ export async function GET(request: NextRequest) {
 
   let scanned = 0;
   let matched = 0;
+  let bounces = 0;
   const errors: string[] = [];
 
   for (const account of (accounts ?? []) as EmailAccount[]) {
@@ -35,7 +57,11 @@ export async function GET(request: NextRequest) {
     try {
       inbound = await fetchInbound(account, since);
     } catch (e) {
-      errors.push(`${account.sender_email}: ${e instanceof Error ? e.message : "fetch error"}`);
+      const msg = e instanceof Error ? e.message : "fetch error";
+      errors.push(`${account.sender_email}: ${msg}`);
+      // Am Konto sichtbar machen (z. B. "Posteingang-Berechtigung fehlt") —
+      // sonst bleibt kaputte Antwort-Erkennung unbemerkt.
+      await markAccountError(account.id, `Posteingang-Sync: ${msg}`).catch(() => {});
       continue;
     }
 
@@ -44,6 +70,16 @@ export async function GET(request: NextRequest) {
       scanned++;
       if (!msg.fromEmail) continue;
       if (msg.fromEmail === ownAddr) continue; // eigene Adresse / Loopback / NDR an sich selbst ignorieren
+
+      /* Unzustellbarkeits-Bericht → Bounce verbuchen (stoppt die Sequenz) */
+      if (isNdr(msg)) {
+        const recipient = extractBouncedRecipient(msg, ownAddr);
+        if (recipient) {
+          const ok = await trackBounce(recipient, "hard", account.user_id).catch(() => false);
+          if (ok) bounces++;
+        }
+        continue;
+      }
 
       // Nur Antworten auf unser Outreach: es muss bereits eine E-Mail-Conversation
       // mit dieser Adresse existieren (durch den Send-Cron angelegt).
@@ -90,5 +126,5 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true, scanned, matched, accounts: (accounts ?? []).length, errors });
+  return NextResponse.json({ ok: true, scanned, matched, bounces, accounts: (accounts ?? []).length, errors });
 }

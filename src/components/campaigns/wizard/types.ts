@@ -2,8 +2,6 @@
 
 export type WizardStep = 0 | 1 | 2 | 3 | 4 | 5; // 0..4 = steps, 5 = review
 
-export type Tone = "formal" | "professional" | "casual";
-
 export type EmailProvider = "google" | "google_oauth" | "microsoft_graph" | "microsoft_oauth" | "smtp";
 
 export interface MailboxOption {
@@ -37,12 +35,10 @@ export interface BasicsState {
   senderEmail: string;
   replyTo: string;
   language: string;
-  tone: Tone;
 }
 
 export interface AudienceState {
   selectedLeadIds: Set<string>;
-  excludeContacted: boolean;
 }
 
 export interface SequenceStep {
@@ -83,6 +79,46 @@ export function buildAutoSteps(count: number): SequenceStep[] {
   });
 }
 
+/* ── Firmenprofil (brand_settings) → vorausgefülltes KI-Briefing ── */
+
+export interface BrandInfo {
+  companyName: string | null;
+  offering: string | null;
+  valueProp: string | null;
+  targetCustomer: string | null;
+}
+
+/**
+ * Baut das Standard-Briefing aus dem Firmenprofil der Einstellungen.
+ * Mit gepflegtem Profil entsteht ein sofort nutzbarer, echter Prompt —
+ * ohne Profil ein Gerüst mit klar markierten Lücken.
+ */
+export function buildDefaultPrompt(brand: BrandInfo): string {
+  const company  = brand.companyName?.trim();
+  const offering = brand.offering?.trim();
+  const value    = brand.valueProp?.trim();
+  const target   = brand.targetCustomer?.trim();
+
+  const intro: string[] = [];
+  if (company && offering) intro.push(`Wir sind ${company}. ${offering}`);
+  else if (company)        intro.push(`Wir sind ${company}.`);
+  else if (offering)       intro.push(offering);
+  else                     intro.push("Wir sind [Firmenname] und bieten [kurz beschreiben, was ihr macht].");
+
+  if (value)  intro.push(`Unser Nutzen für Kund:innen: ${value}`);
+  if (target) intro.push(`Wir richten uns an: ${target}`);
+  if (!value && !target) {
+    intro.push("Unser Nutzen für Kund:innen: [konkreter Mehrwert, z. B. Zeitersparnis, Ergebnis].");
+  }
+
+  const rules =
+    "Schreibe kurz und auf Augenhöhe, ohne Marketing-Floskeln und Superlative. " +
+    "Beziehe dich konkret auf das Unternehmen der Empfänger:in (Branche, Standort). " +
+    "Verwende die Sie-Form. Ziel: ein kurzes Erstgespräch (15 Minuten) vereinbaren.";
+
+  return `${intro.join("\n\n")}\n\n${rules}`;
+}
+
 export interface ScheduleState {
   days: boolean[]; // length 7, Mo..So
   timeFrom: string;
@@ -104,9 +140,9 @@ export interface WizardState {
 }
 
 export const STEPS = [
-  { key: "mailbox",  name: "Mailbox wählen",     sub: "Absender für diese Kampagne" },
-  { key: "basics",   name: "Kampagne",           sub: "Name, Tonalität, Sprache" },
-  { key: "audience", name: "Zielgruppe",         sub: "Welche Leads kontaktieren" },
-  { key: "sequence", name: "KI-Briefing",        sub: "Was die KI schreiben soll" },
-  { key: "schedule", name: "Zeitplan & Start",   sub: "Sendefenster & Limits" },
+  { key: "mailbox",  name: "Mailbox",     sub: "Absender wählen" },
+  { key: "basics",   name: "Kampagne",    sub: "Name & Sprache" },
+  { key: "audience", name: "Empfänger",   sub: "Leads auswählen" },
+  { key: "sequence", name: "Briefing",    sub: "Was geschrieben wird" },
+  { key: "schedule", name: "Zeitplan",    sub: "Sendefenster & Limit" },
 ] as const;

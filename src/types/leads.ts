@@ -4,6 +4,8 @@ export type LeadStatus = "new" | "contacted" | "interested" | "not_interested" |
 
 export interface LeadFilters {
   status?: LeadStatus;
+  /** Leads mit diesen Status ausschließen (z. B. bereits kontaktierte) */
+  exclude_status?: LeadStatus[];
   city?: string | string[];
   /** Österreichisches Bundesland – wird serverseitig auf PLZ-Muster gemappt */
   state?: string | string[];

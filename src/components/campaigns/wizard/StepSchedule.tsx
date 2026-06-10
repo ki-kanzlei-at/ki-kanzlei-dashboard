@@ -1,6 +1,5 @@
 "use client";
 
-import { Calendar, Globe, ShieldCheck, BarChart3 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -65,13 +64,10 @@ export function StepSchedule({ state, onChange }: StepScheduleProps) {
   return (
     <>
       <div className="step-head">
-        <div className="step-eyebrow">
-          <Calendar className="h-3 w-3" strokeWidth={1.75} />
-          Schritt 5 von 5
-        </div>
+        <div className="step-eyebrow">Schritt 5 von 5</div>
         <h1 className="step-heading">Wann und wie viel?</h1>
         <p className="step-desc">
-          Empfohlen: Werktags zwischen 09:00 und 17:00, mit moderaten Limits für hohe Zustellbarkeit.
+          Empfohlen: werktags zwischen 09:00 und 17:00, mit moderaten Limits für hohe Zustellbarkeit.
         </p>
       </div>
 
@@ -134,7 +130,6 @@ export function StepSchedule({ state, onChange }: StepScheduleProps) {
               onValueChange={(v) => onChange({ ...state, timezone: v })}
             >
               <SelectTrigger id="timezone" className="h-10 w-full">
-                <Globe className="h-4 w-4 text-muted-foreground" strokeWidth={1.75} />
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -197,11 +192,8 @@ export function StepSchedule({ state, onChange }: StepScheduleProps) {
       <div className="wiz-section">
         <div className="wiz-section-head">
           <div className="left">
-            <h3>
-              <BarChart3 className="h-3.5 w-3.5 text-primary" strokeWidth={1.75} />
-              Tracking
-            </h3>
-            <p>Welche Events wir messen sollen.</p>
+            <h3>Tracking</h3>
+            <p>Welche Events gemessen werden sollen.</p>
           </div>
         </div>
         <div className="wiz-section-body">
@@ -238,16 +230,6 @@ export function StepSchedule({ state, onChange }: StepScheduleProps) {
         </div>
       </div>
 
-      <div className="wiz-callout">
-        <ShieldCheck className="ico h-4 w-4" strokeWidth={1.75} />
-        <div>
-          <div className="t">Bereit zum Start</div>
-          <div className="b">
-            Du kannst die Kampagne als Entwurf speichern oder direkt starten.
-            Der erste Versand erfolgt erst, wenn dein Sendefenster offen ist.
-          </div>
-        </div>
-      </div>
     </>
   );
 }

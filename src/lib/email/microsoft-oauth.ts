@@ -125,6 +125,67 @@ export async function sendViaMicrosoftOAuth(account: EmailAccount, options: Send
   }
 }
 
+/* ── Posteingang lesen (Antwort-Erkennung / Auto-Stop) ── */
+
+interface MsOAuthInboundMessage {
+  fromEmail: string;
+  fromName: string | null;
+  subject: string | null;
+  text: string;
+  receivedAt: string;
+  messageId: string;
+}
+
+/**
+ * Holt eingegangene Mails seit `since` über delegiertes Graph (/me).
+ * Der Mail.Read-Scope wird beim Verbinden bereits angefordert.
+ */
+export async function fetchRecentInboundMicrosoftOAuth(
+  account: EmailAccount,
+  since: Date,
+  limit = 30,
+): Promise<MsOAuthInboundMessage[]> {
+  const accessToken = await ensureAccessToken(account);
+
+  const url = new URL("https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages");
+  url.searchParams.set("$top", String(limit));
+  url.searchParams.set("$orderby", "receivedDateTime desc");
+  url.searchParams.set("$select", "from,subject,bodyPreview,receivedDateTime,internetMessageId");
+  url.searchParams.set("$filter", `receivedDateTime ge ${since.toISOString()}`);
+
+  const res = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 403) {
+      throw new Error(
+        "Posteingang-Berechtigung fehlt — bitte das Microsoft-Konto in den E-Mail-Einstellungen einmal neu verbinden.",
+      );
+    }
+    throw new Error(`Graph Inbox-Fehler: ${data.error?.message || res.status}`);
+  }
+
+  const items = (data.value ?? []) as Array<{
+    from?: { emailAddress?: { address?: string; name?: string } };
+    subject?: string;
+    bodyPreview?: string;
+    receivedDateTime?: string;
+    internetMessageId?: string;
+  }>;
+
+  return items
+    .map((m) => ({
+      fromEmail: (m.from?.emailAddress?.address ?? "").toLowerCase(),
+      fromName: m.from?.emailAddress?.name ?? null,
+      subject: m.subject ?? null,
+      text: m.bodyPreview ?? "",
+      receivedAt: m.receivedDateTime ?? new Date().toISOString(),
+      messageId: m.internetMessageId || `graph:${m.receivedDateTime}:${m.from?.emailAddress?.address}`,
+    }))
+    .filter((m) => m.fromEmail.length > 0);
+}
+
 /** Verbindungstest: gültiges Access-Token holen + Profil lesen. */
 export async function testMicrosoftOAuth(account: EmailAccount): Promise<{ ok: boolean; error?: string }> {
   try {

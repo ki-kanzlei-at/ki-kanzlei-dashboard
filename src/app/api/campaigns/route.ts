@@ -4,8 +4,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
   getCampaigns,
+  getCampaignStatusCounts,
   createCampaign,
 } from "@/lib/supabase/campaigns";
+import { getEmailAccountById } from "@/lib/supabase/email-accounts";
 import type {
   CampaignInsert,
   CampaignStatus,
@@ -45,17 +47,32 @@ export async function GET(request: NextRequest) {
         ? (rawStatus as CampaignStatus)
         : undefined;
 
+    /* Zeitraum-Filter: 7d / 30d / 90d / ytd */
+    const rangeParam = params.get("range");
+    let createdWithinDays: number | undefined;
+    if (rangeParam === "7d") createdWithinDays = 7;
+    else if (rangeParam === "30d") createdWithinDays = 30;
+    else if (rangeParam === "90d") createdWithinDays = 90;
+    else if (rangeParam === "ytd") {
+      const startOfYear = new Date(new Date().getFullYear(), 0, 1).getTime();
+      createdWithinDays = Math.ceil((Date.now() - startOfYear) / 86_400_000);
+    }
+
     const filters = {
       status,
       search: params.get("search") || undefined,
+      createdWithinDays,
     };
 
     const page     = clampInt(params.get("page"), 1, 10_000, 1);
     const pageSize = clampInt(params.get("limit") ?? params.get("page_size"), 1, 200, 25);
 
-    const result = await getCampaigns(user.id, filters, { page, pageSize });
+    const [result, statusCounts] = await Promise.all([
+      getCampaigns(user.id, filters, { page, pageSize }),
+      getCampaignStatusCounts(user.id),
+    ]);
 
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, status_counts: statusCounts });
   } catch (err) {
     console.error("[API /api/campaigns GET]", err);
     return NextResponse.json(
@@ -81,22 +98,50 @@ export async function POST(request: NextRequest) {
     }
 
     const leadIdsRaw = Array.isArray(body.lead_ids) ? body.lead_ids : [];
-    const lead_ids = leadIdsRaw
-      .filter((v): v is string => typeof v === "string" && v.length > 0)
-      .slice(0, 10_000);
+    const submittedLeadIds = Array.from(new Set(
+      leadIdsRaw.filter((v): v is string => typeof v === "string" && v.length > 0),
+    )).slice(0, 10_000);
 
-    if (lead_ids.length === 0) {
+    /* ── Wizard-Payload normalisieren ── */
+    const statusInput = sanitize(body.status, 32);
+    // Beim Erstellen sind nur Entwurf oder direkter Start sinnvoll.
+    const status: CampaignStatus = statusInput === "active" ? "active" : "draft";
+
+    // Entwürfe dürfen ohne Leads gespeichert werden — nur ein Start braucht
+    // mindestens eine:n Empfänger:in.
+    if (status === "active" && submittedLeadIds.length === 0) {
       return NextResponse.json(
         { error: "Mindestens ein Lead muss ausgewählt sein" },
         { status: 400 },
       );
     }
 
-    /* ── Wizard-Payload normalisieren ── */
-    const statusInput = sanitize(body.status, 32);
-    const status: CampaignStatus = (VALID_STATUS as string[]).includes(statusInput)
-      ? (statusInput as CampaignStatus)
-      : "draft";
+    /* ── Ownership-Validierung: nur eigene Leads dürfen angehängt werden ──
+     * RLS filtert fremde IDs automatisch heraus; wir übernehmen nur die
+     * Schnittmenge. Chunked, damit die Query-URL nicht zu lang wird. */
+    const lead_ids: string[] = [];
+    const CHUNK = 200;
+    for (let i = 0; i < submittedLeadIds.length; i += CHUNK) {
+      const slice = submittedLeadIds.slice(i, i + CHUNK);
+      const { data: owned, error: ownErr } = await supabase
+        .from("leads")
+        .select("id")
+        .in("id", slice);
+      if (ownErr) {
+        return NextResponse.json(
+          { error: `Leads konnten nicht geprüft werden: ${ownErr.message}` },
+          { status: 500 },
+        );
+      }
+      lead_ids.push(...(owned ?? []).map((l) => l.id as string));
+    }
+
+    if (status === "active" && lead_ids.length === 0) {
+      return NextResponse.json(
+        { error: "Keiner der ausgewählten Leads wurde gefunden" },
+        { status: 400 },
+      );
+    }
 
     const toneInput = sanitize(body.tone, 32);
     const tone: CampaignTone = (VALID_TONE as string[]).includes(toneInput)
@@ -110,7 +155,21 @@ export async function POST(request: NextRequest) {
       ? body.system_prompt.slice(0, 8192)
       : null;
     const mailboxId    = sanitize(body.mailbox_id, 64) || null;
-    const replyTo      = sanitize(body.reply_to, 254) || "info@ki-kanzlei.at";
+
+    /* ── Mailbox-Ownership prüfen + reply_to vom Postfach ableiten ── */
+    let replyTo = sanitize(body.reply_to, 254);
+    if (mailboxId) {
+      const mailbox = await getEmailAccountById(mailboxId, user.id);
+      if (!mailbox) {
+        return NextResponse.json(
+          { error: "Die gewählte Mailbox wurde nicht gefunden" },
+          { status: 400 },
+        );
+      }
+      if (!replyTo) {
+        replyTo = mailbox.reply_to || mailbox.sender_email || "";
+      }
+    }
 
     /* Sequence */
     const rawSteps = Array.isArray(body.sequence_steps) ? body.sequence_steps : [];
@@ -168,7 +227,7 @@ export async function POST(request: NextRequest) {
       lead_ids,
       daily_limit:        dailyLimit,
       delay_minutes:      delayMinutes,
-      reply_to:           replyTo,
+      reply_to:           replyTo || undefined,
       mailbox_id:         mailboxId,
       sender_name:        senderName,
       goal,

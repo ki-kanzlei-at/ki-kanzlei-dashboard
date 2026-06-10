@@ -24,6 +24,19 @@ const SORTABLE_COLUMNS = new Set([
   "company", "industry", "city", "status", "created_at", "email", "website",
 ]);
 
+/**
+ * Escaped einen Suchbegriff für die Verwendung in PostgREST-`or()`-Klauseln.
+ * Kommas/Klammern würden sonst als Klausel-Syntax geparst, `%`/`_` als
+ * Wildcards. Der Wert wird in doppelte Anführungszeichen gesetzt (PostgREST-
+ * Quoting) und Wildcards werden literal escaped.
+ */
+function ilikePattern(term: string): string {
+  const cleaned = term
+    .replace(/["\\]/g, "")        // Quotes/Backslashes entfernen (Quoting-sicher)
+    .replace(/([%_])/g, "\\$1");  // literale Wildcards escapen
+  return `"%${cleaned}%"`;
+}
+
 /** Pagination-Optionen */
 export interface PaginationOptions {
   page?: number;
@@ -62,6 +75,7 @@ export async function getLeads(
   filters: LeadFilters = {},
   pagination: PaginationOptions = {},
   sort: SortOptions = {},
+  selectColumns = "*",
 ): Promise<PaginatedResult<Lead>> {
   const supabase = await createClient();
 
@@ -72,11 +86,14 @@ export async function getLeads(
 
   let query = supabase
     .from("leads")
-    .select("*", { count: "exact" });
+    .select(selectColumns, { count: "exact" });
 
   /* Exakte Filter */
   if (filters.status) {
     query = query.eq("status", filters.status);
+  }
+  if (filters.exclude_status && filters.exclude_status.length > 0 && !filters.status) {
+    query = query.not("status", "in", `(${filters.exclude_status.join(",")})`);
   }
   if (filters.city) {
     if (Array.isArray(filters.city)) {
@@ -102,15 +119,10 @@ export async function getLeads(
     query = query.eq("search_location", filters.search_location);
   }
   if (filters.legal_form) {
-    if (Array.isArray(filters.legal_form)) {
-      // OR-Verknüpfung: .in() nicht möglich bei ilike, daher or()
-      const orClause = filters.legal_form
-        .map((lf) => `legal_form.ilike.%${lf}%`)
-        .join(",");
-      query = query.or(orClause);
-    } else {
-      query = query.ilike("legal_form", `%${filters.legal_form}%`);
-    }
+    // Optionen stammen aus getDistinctLegalForms (exakte DB-Werte) →
+    // exakter Match statt Substring ("GmbH" darf nicht "GmbH & Co KG" treffen).
+    const forms = Array.isArray(filters.legal_form) ? filters.legal_form : [filters.legal_form];
+    query = query.in("legal_form", forms);
   }
   if (filters.country) {
     query = query.eq("country", filters.country);
@@ -147,7 +159,7 @@ export async function getLeads(
 
   /* Volltextsuche über mehrere Spalten */
   if (filters.search) {
-    const term = `%${filters.search}%`;
+    const term = ilikePattern(filters.search);
     query = query.or(
       `name.ilike.${term},company.ilike.${term},company_name.ilike.${term},email.ilike.${term},city.ilike.${term}`,
     );
@@ -167,12 +179,39 @@ export async function getLeads(
   const total = count ?? 0;
 
   return {
-    data: (data ?? []) as Lead[],
+    // Cast über unknown: bei dynamischem selectColumns kann TS den Row-Typ
+    // nicht ableiten; Aufrufer mit "id"-Select nutzen nur das id-Feld.
+    data: (data ?? []) as unknown as Lead[],
     count: total,
     page,
     pageSize,
     totalPages: Math.ceil(total / pageSize),
   };
+}
+
+/**
+ * Nur die IDs aller Leads, die auf die Filter zutreffen (für
+ * "Alle Treffer auswählen" in der Kampagnen-Zielgruppe). Hartes Limit,
+ * damit die Antwort klein bleibt; RLS scoped auf den User.
+ */
+export async function getLeadIds(
+  filters: LeadFilters = {},
+  limit = 10_000,
+): Promise<{ ids: string[]; count: number }> {
+  // Nur die id-Spalte laden — Filterlogik bleibt identisch zur Listenansicht.
+  // Seitenweise (1000er-Schritte): PostgREST deckelt einzelne Antworten auf
+  // max-rows (Supabase-Default 1000) — eine einzelne 10k-Anfrage käme also
+  // stillschweigend gekürzt zurück.
+  const PAGE = 1000;
+  const ids: string[] = [];
+  let count = 0;
+  for (let page = 1; ids.length < limit; page++) {
+    const result = await getLeads(filters, { page, pageSize: PAGE }, {}, "id");
+    count = result.count;
+    ids.push(...result.data.map((l) => l.id));
+    if (result.data.length < PAGE || ids.length >= result.count) break;
+  }
+  return { ids: ids.slice(0, limit), count };
 }
 
 /**
@@ -364,7 +403,7 @@ function applyFilters(query: any, filters: LeadFilters) {
     if (clauses.length > 0) { query = query.or(clauses.join(",")); hasFilter = true; }
   }
   if (filters.search) {
-    const term = `%${filters.search}%`;
+    const term = ilikePattern(filters.search);
     query = query.or(`name.ilike.${term},company.ilike.${term},company_name.ilike.${term},email.ilike.${term},city.ilike.${term}`);
     hasFilter = true;
   }

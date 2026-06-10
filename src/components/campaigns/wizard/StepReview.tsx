@@ -1,6 +1,5 @@
 "use client";
 
-import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { WizardState } from "./types";
 
@@ -17,10 +16,11 @@ const PROVIDER_LABEL: Record<string, string> = {
   smtp: "SMTP",
 };
 
-const TONE_LABEL: Record<string, string> = {
-  formal: "Formal",
-  professional: "Professionell",
-  casual: "Locker",
+const LANGUAGE_LABEL: Record<string, string> = {
+  "de-AT": "Deutsch (Österreich)",
+  "de-DE": "Deutsch (Deutschland)",
+  "de-CH": "Deutsch (Schweiz)",
+  "en":    "Englisch",
 };
 
 const DAY_LABEL = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
@@ -31,6 +31,7 @@ export function StepReview({ state, onJump }: StepReviewProps) {
     .map((on, i) => on ? DAY_LABEL[i] : null)
     .filter(Boolean)
     .join(", ") || "—";
+  const followUps = Math.max(0, state.sequence.mailCount - 1);
 
   const rows: { k: string; v: string; sub?: string; jump: number }[] = [
     {
@@ -40,39 +41,29 @@ export function StepReview({ state, onJump }: StepReviewProps) {
       jump: 0,
     },
     {
-      k: "Kampagnenname",
+      k: "Kampagne",
       v: state.basics.name || "—",
-      sub: `${TONE_LABEL[state.basics.tone] ?? state.basics.tone} · ${state.basics.language}`,
+      sub: LANGUAGE_LABEL[state.basics.language] ?? state.basics.language,
       jump: 1,
     },
     {
-      k: "Absender:in",
-      v: state.basics.senderName || "—",
-      sub: state.basics.senderEmail || state.mailbox.email,
-      jump: 1,
-    },
-    {
-      k: "Zielgruppe",
-      v: `${audienceCount.toLocaleString("de-DE")} Empfänger:innen`,
-      sub: state.audience.excludeContacted ? "Bereits kontaktierte ausgeblendet" : "Alle Leads",
+      k: "Empfänger",
+      v: `${audienceCount.toLocaleString("de-DE")} Leads`,
+      sub: "Bereits kontaktierte automatisch ausgenommen",
       jump: 2,
     },
     {
-      k: "KI-Anweisung",
-      v: `${state.sequence.systemPrompt.length} Zeichen Prompt`,
-      sub: `${state.sequence.mailCount} ${state.sequence.mailCount === 1 ? "Mail" : "Mails"} autonom geschrieben`,
+      k: "Briefing",
+      v: `${state.sequence.mailCount} ${state.sequence.mailCount === 1 ? "Mail" : "Mails"}`,
+      sub: followUps > 0
+        ? `Erstkontakt + ${followUps} Follow-up${followUps > 1 ? "s" : ""} · stoppt bei Antwort`
+        : "Nur Erstkontakt",
       jump: 3,
     },
     {
       k: "Sendefenster",
       v: `${dayString} · ${state.schedule.timeFrom} – ${state.schedule.timeTo}`,
-      sub: state.schedule.timezone,
-      jump: 4,
-    },
-    {
-      k: "Tägl. Limit",
-      v: `${state.schedule.daily} E-Mails / Tag`,
-      sub: `Abstand: ${state.schedule.gap} Sek. (random ± 20 %)`,
+      sub: `Max. ${state.schedule.daily} E-Mails / Tag`,
       jump: 4,
     },
   ];
@@ -80,13 +71,10 @@ export function StepReview({ state, onJump }: StepReviewProps) {
   return (
     <>
       <div className="step-head">
-        <div className="step-eyebrow">
-          <Check className="h-3 w-3" strokeWidth={2.25} />
-          Letzte Prüfung
-        </div>
-        <h1 className="step-heading">Alles bereit zum Start</h1>
+        <div className="step-eyebrow">Prüfen &amp; starten</div>
+        <h1 className="step-heading">Alles bereit</h1>
         <p className="step-desc">
-          Überprüfe die Einstellungen. Klicke &bdquo;Bearbeiten&ldquo; zu jedem Punkt, um zurückzuspringen.
+          Kurz prüfen — danach startet der Versand im nächsten offenen Sendefenster.
         </p>
       </div>
       <div className="review-card">
