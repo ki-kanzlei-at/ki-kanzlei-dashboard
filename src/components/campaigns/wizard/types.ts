@@ -1,6 +1,8 @@
-/* Shared types for the 5-step campaign creation wizard. */
+/* Shared types for the 4-step campaign creation wizard. */
 
-export type WizardStep = 0 | 1 | 2 | 3 | 4 | 5; // 0..4 = steps, 5 = review
+import { MAX_SEQUENCE_STEPS } from "@/types/campaigns";
+
+export type WizardStep = 0 | 1 | 2 | 3 | 4; // 0..3 = steps, 4 = review
 
 export type EmailProvider = "google" | "google_oauth" | "microsoft_graph" | "microsoft_oauth" | "smtp";
 
@@ -22,18 +24,16 @@ export interface MailboxOption {
 }
 
 export interface MailboxState {
-  mailboxId: string | null;
-  email: string;
-  provider: EmailProvider | null;
+  /** Mehrfachauswahl — bei mehr als einer Mailbox rotiert der Versand automatisch. */
+  mailboxIds: string[];
+  /** Anzeige-E-Mails der gewählten Konten (gleiche Reihenfolge wie mailboxIds). */
+  emails: string[];
+  /** Absender-Name des zuerst gewählten Kontos (Anzeige im Review). */
   senderName: string;
-  replyTo: string;
 }
 
 export interface BasicsState {
   name: string;
-  senderName: string;
-  senderEmail: string;
-  replyTo: string;
   language: string;
 }
 
@@ -55,7 +55,7 @@ export interface SequenceDelay {
 export interface SequenceState {
   /** Master-Prompt: einmal einstellen, die KI schreibt jede Mail daraus. */
   systemPrompt: string;
-  /** Gesamtzahl Mails inkl. Erstkontakt (1..5). */
+  /** Gesamtzahl Mails inkl. Erstkontakt (1..MAX_SEQUENCE_STEPS). */
   mailCount: number;
   /** Tage Wartezeit vor jeder Folge-Mail (Länge = mailCount-1). */
   delayDays: number[];
@@ -65,7 +65,7 @@ export interface SequenceState {
 /** Leitet die (für den Versand nötigen) Sequenz-Steps automatisch aus der
  *  Mail-Anzahl ab — der/die User konfiguriert keine Intents/Beschreibungen mehr. */
 export function buildAutoSteps(count: number): SequenceStep[] {
-  const n = Math.max(1, Math.min(5, count));
+  const n = Math.max(1, Math.min(MAX_SEQUENCE_STEPS, count));
   return Array.from({ length: n }, (_, i) => {
     const isFirst = i === 0;
     const isLast = i === n - 1 && n > 1;
@@ -140,9 +140,8 @@ export interface WizardState {
 }
 
 export const STEPS = [
-  { key: "mailbox",  name: "Mailbox",     sub: "Absender wählen" },
-  { key: "basics",   name: "Kampagne",    sub: "Name & Sprache" },
-  { key: "audience", name: "Empfänger",   sub: "Leads auswählen" },
-  { key: "sequence", name: "Briefing",    sub: "Was geschrieben wird" },
-  { key: "schedule", name: "Zeitplan",    sub: "Sendefenster & Limit" },
+  { key: "mailbox",  name: "Mailbox",   sub: "Absender & Rotation" },
+  { key: "audience", name: "Empfänger", sub: "Leads auswählen" },
+  { key: "sequence", name: "Briefing",  sub: "Name & Inhalt" },
+  { key: "schedule", name: "Zeitplan",  sub: "Sendefenster & Limit" },
 ] as const;

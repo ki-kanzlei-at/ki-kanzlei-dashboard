@@ -11,7 +11,8 @@ export type CampaignLeadStatus =
   | "completed";
 
 export type CampaignActivityKind =
-  | "reply" | "open" | "send" | "pause" | "completed" | "draft" | "click";
+  | "reply" | "open" | "send" | "pause" | "completed" | "draft" | "click"
+  | "start" | "archived";
 
 export type CampaignTone = "formal" | "professional" | "casual";
 
@@ -66,6 +67,8 @@ export interface Campaign {
 
   /* ── Wizard fields (new) ── */
   mailbox_id: string | null;
+  /** Mehrere Mailboxen → automatische Rotation beim Versand. Leer = mailbox_id bzw. alle aktiven Konten. */
+  mailbox_ids: string[];
   sender_name: string | null;
   sender_email?: string | null;
   goal: string | null;
@@ -94,6 +97,7 @@ export interface CampaignInsert {
   delay_minutes?: number;
   reply_to?: string;
   mailbox_id?: string | null;
+  mailbox_ids?: string[];
   sender_name?: string | null;
   goal?: string | null;
   language?: string;
@@ -117,6 +121,7 @@ export type CampaignUpdate = Partial<
     | "reply_to"
     | "error_message"
     | "mailbox_id"
+    | "mailbox_ids"
     | "sender_name"
     | "goal"
     | "language"
@@ -164,6 +169,9 @@ export interface CampaignLead {
     industry?: string | null;
   };
 }
+
+/** Maximale Anzahl Sequenz-Schritte je Kampagne (Wizard, Edit & API). */
+export const MAX_SEQUENCE_STEPS = 3;
 
 /* ── Defaults für Wizard-Insert ───────────────────────────────── */
 export const DEFAULT_SCHEDULE: CampaignSchedule = {

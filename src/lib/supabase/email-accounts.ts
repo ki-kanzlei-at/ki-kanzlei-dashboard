@@ -78,7 +78,14 @@ export async function getEmailAccounts(userId: string): Promise<EmailAccount[]> 
     .order("created_at", { ascending: true });
 
   if (error) throw new Error(`Fehler beim Laden der E-Mail-Konten: ${error.message}`);
-  return (data ?? []) as EmailAccount[];
+
+  /* Tages-Rollover: der Zähler wird sonst erst beim ersten Versand des Tages
+   * zurückgesetzt (getActiveAccountsForUser) — bis dahin stünde hier der
+   * Vortageswert. Nur für die Anzeige normalisieren, kein Write nötig. */
+  const today = new Date().toISOString().slice(0, 10);
+  return ((data ?? []) as EmailAccount[]).map((a) =>
+    a.sent_today_date === today ? a : { ...a, sent_today: 0, sent_today_date: today },
+  );
 }
 
 export async function getEmailAccountById(id: string, userId: string): Promise<EmailAccount | null> {

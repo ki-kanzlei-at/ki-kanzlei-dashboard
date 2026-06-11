@@ -2,14 +2,6 @@
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { ScheduleState } from "./types";
 
@@ -64,10 +56,11 @@ export function StepSchedule({ state, onChange }: StepScheduleProps) {
   return (
     <>
       <div className="step-head">
-        <div className="step-eyebrow">Schritt 5 von 5</div>
+        <div className="step-eyebrow">Schritt 4 von 4</div>
         <h1 className="step-heading">Wann und wie viel?</h1>
         <p className="step-desc">
           Empfohlen: werktags zwischen 09:00 und 17:00, mit moderaten Limits für hohe Zustellbarkeit.
+          Tracking und Versand-Pausen sind sinnvoll voreingestellt.
         </p>
       </div>
 
@@ -104,7 +97,7 @@ export function StepSchedule({ state, onChange }: StepScheduleProps) {
                 type="time"
                 value={state.timeFrom}
                 onChange={(e) => onChange({ ...state, timeFrom: e.target.value })}
-                className="h-10"
+                className="input-bright h-10"
               />
             </div>
             <div className="space-y-2">
@@ -116,116 +109,35 @@ export function StepSchedule({ state, onChange }: StepScheduleProps) {
                 type="time"
                 value={state.timeTo}
                 onChange={(e) => onChange({ ...state, timeTo: e.target.value })}
-                className="h-10"
+                className="input-bright h-10"
               />
             </div>
-          </div>
-
-          <div className="space-y-2 mt-4">
-            <Label htmlFor="timezone" className="text-[12px] font-medium text-foreground">
-              Zeitzone
-            </Label>
-            <Select
-              value={state.timezone}
-              onValueChange={(v) => onChange({ ...state, timezone: v })}
-            >
-              <SelectTrigger id="timezone" className="h-10 w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Europe/Vienna">Europe/Vienna (UTC+1, Sommerzeit)</SelectItem>
-                <SelectItem value="Europe/Berlin">Europe/Berlin</SelectItem>
-                <SelectItem value="Europe/Zurich">Europe/Zurich</SelectItem>
-              </SelectContent>
-            </Select>
           </div>
 
           <SchedulePreview state={state} />
         </div>
       </div>
 
-      {/* Limits */}
+      {/* Limit */}
       <div className="wiz-section">
         <div className="wiz-section-head">
           <div className="left">
-            <h3>Sende-Limits</h3>
-            <p>Begrenze die Anzahl pro Tag und den Abstand zwischen E-Mails.</p>
+            <h3>Tageslimit</h3>
+            <p>Maximale Anzahl E-Mails pro Tag über diese Kampagne.</p>
           </div>
         </div>
         <div className="wiz-section-body">
-          <div className="mb-4">
-            <Label className="text-[12px] font-medium text-foreground">Max. E-Mails pro Tag</Label>
-            <div className="slider-row mt-2">
-              <input
-                type="range"
-                min={10} max={500} step={10}
-                value={state.daily}
-                onChange={(e) => onChange({ ...state, daily: Number(e.target.value) })}
-                className="slider"
-              />
-              <span className="slider-val">
-                {state.daily}<span className="unit">/ Tag</span>
-              </span>
-            </div>
-          </div>
-          <div>
-            <Label className="text-[12px] font-medium text-foreground">
-              Abstand zwischen E-Mails (random)
-            </Label>
-            <div className="slider-row mt-2">
-              <input
-                type="range"
-                min={30} max={600} step={30}
-                value={state.gap}
-                onChange={(e) => onChange({ ...state, gap: Number(e.target.value) })}
-                className="slider"
-              />
-              <span className="slider-val">
-                {state.gap}<span className="unit">Sek. ± 20 %</span>
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Tracking */}
-      <div className="wiz-section">
-        <div className="wiz-section-head">
-          <div className="left">
-            <h3>Tracking</h3>
-            <p>Welche Events gemessen werden sollen.</p>
-          </div>
-        </div>
-        <div className="wiz-section-body">
-          <div className="row-toggle">
-            <div className="label-block">
-              <div className="t">Öffnungen tracken</div>
-              <div className="s">Wir setzen ein 1×1 Pixel, schaltbar pro Empfänger.</div>
-            </div>
-            <Switch
-              checked={state.trackOpens}
-              onCheckedChange={(v) => onChange({ ...state, trackOpens: v })}
+          <div className="slider-row">
+            <input
+              type="range"
+              min={10} max={500} step={10}
+              value={state.daily}
+              onChange={(e) => onChange({ ...state, daily: Number(e.target.value) })}
+              className="slider"
             />
-          </div>
-          <div className="row-toggle">
-            <div className="label-block">
-              <div className="t">Klicks tracken</div>
-              <div className="s">Links in der E-Mail werden durch Tracking-Links ersetzt.</div>
-            </div>
-            <Switch
-              checked={state.trackClicks}
-              onCheckedChange={(v) => onChange({ ...state, trackClicks: v })}
-            />
-          </div>
-          <div className="row-toggle">
-            <div className="label-block">
-              <div className="t">Antworten erkennen</div>
-              <div className="s">Antworten landen direkt in der Inbox und stoppen die Sequenz automatisch.</div>
-            </div>
-            <Switch
-              checked={state.trackReplies}
-              onCheckedChange={(v) => onChange({ ...state, trackReplies: v })}
-            />
+            <span className="slider-val">
+              {state.daily}<span className="unit">/ Tag</span>
+            </span>
           </div>
         </div>
       </div>

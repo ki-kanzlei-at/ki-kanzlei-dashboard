@@ -7,7 +7,6 @@ import {
   getCampaignStatusCounts,
   createCampaign,
 } from "@/lib/supabase/campaigns";
-import { getEmailAccountById } from "@/lib/supabase/email-accounts";
 import type {
   CampaignInsert,
   CampaignStatus,
@@ -15,6 +14,7 @@ import type {
   SequenceStep,
   SequenceDelay,
 } from "@/types/campaigns";
+import { MAX_SEQUENCE_STEPS } from "@/types/campaigns";
 
 function sanitize(v: unknown, max = 512): string {
   if (typeof v !== "string") return "";
@@ -119,7 +119,7 @@ export async function POST(request: NextRequest) {
     /* ── Ownership-Validierung: nur eigene Leads dürfen angehängt werden ──
      * RLS filtert fremde IDs automatisch heraus; wir übernehmen nur die
      * Schnittmenge. Chunked, damit die Query-URL nicht zu lang wird. */
-    const lead_ids: string[] = [];
+    const ownedLeadIds: string[] = [];
     const CHUNK = 200;
     for (let i = 0; i < submittedLeadIds.length; i += CHUNK) {
       const slice = submittedLeadIds.slice(i, i + CHUNK);
@@ -133,12 +133,37 @@ export async function POST(request: NextRequest) {
           { status: 500 },
         );
       }
-      lead_ids.push(...(owned ?? []).map((l) => l.id as string));
+      ownedLeadIds.push(...(owned ?? []).map((l) => l.id as string));
     }
+
+    /* ── Doppelkontakt-Schutz: Leads, die bereits in einer Kampagne stecken,
+     * werden serverseitig aussortiert — niemand wird doppelt angeschrieben. */
+    const alreadyTargeted = new Set<string>();
+    for (let i = 0; i < ownedLeadIds.length; i += CHUNK) {
+      const slice = ownedLeadIds.slice(i, i + CHUNK);
+      const { data: existing, error: exErr } = await supabase
+        .from("campaign_leads")
+        .select("lead_id")
+        .eq("user_id", user.id)
+        .in("lead_id", slice);
+      if (exErr) {
+        return NextResponse.json(
+          { error: `Leads konnten nicht geprüft werden: ${exErr.message}` },
+          { status: 500 },
+        );
+      }
+      (existing ?? []).forEach((r) => alreadyTargeted.add(r.lead_id as string));
+    }
+    const lead_ids = ownedLeadIds.filter((id) => !alreadyTargeted.has(id));
+    const skippedAlreadyContacted = ownedLeadIds.length - lead_ids.length;
 
     if (status === "active" && lead_ids.length === 0) {
       return NextResponse.json(
-        { error: "Keiner der ausgewählten Leads wurde gefunden" },
+        {
+          error: skippedAlreadyContacted > 0
+            ? "Alle ausgewählten Leads stecken bereits in einer Kampagne"
+            : "Keiner der ausgewählten Leads wurde gefunden",
+        },
         { status: 400 },
       );
     }
@@ -154,22 +179,48 @@ export async function POST(request: NextRequest) {
     const systemPrompt = typeof body.system_prompt === "string"
       ? body.system_prompt.slice(0, 8192)
       : null;
-    const mailboxId    = sanitize(body.mailbox_id, 64) || null;
 
-    /* ── Mailbox-Ownership prüfen + reply_to vom Postfach ableiten ── */
+    /* ── Mailboxen: eine oder mehrere (automatische Rotation) ──
+     * mailbox_ids hat Vorrang; mailbox_id bleibt als Single-Kompat erhalten. */
+    const mailboxIdSingle = sanitize(body.mailbox_id, 64) || null;
+    const rawMailboxIds = Array.isArray(body.mailbox_ids) ? body.mailbox_ids : [];
+    let mailboxIds = Array.from(new Set(
+      rawMailboxIds
+        .filter((v): v is string => typeof v === "string" && v.length > 0)
+        .map((v) => sanitize(v, 64))
+        .filter(Boolean),
+    )).slice(0, 20);
+    if (mailboxIds.length === 0 && mailboxIdSingle) mailboxIds = [mailboxIdSingle];
+
+    /* Ownership prüfen (RLS-scoped) + reply_to ableiten.
+     * Bei Rotation (>1 Mailbox) bleibt reply_to leer — jede Mail antwortet
+     * an die Adresse des jeweils sendenden Kontos. */
     let replyTo = sanitize(body.reply_to, 254);
-    if (mailboxId) {
-      const mailbox = await getEmailAccountById(mailboxId, user.id);
-      if (!mailbox) {
+    if (mailboxIds.length > 0) {
+      const { data: owned, error: mbErr } = await supabase
+        .from("email_accounts")
+        .select("id, reply_to, sender_email")
+        .in("id", mailboxIds);
+      if (mbErr) {
+        return NextResponse.json(
+          { error: `Mailboxen konnten nicht geprüft werden: ${mbErr.message}` },
+          { status: 500 },
+        );
+      }
+      const ownedById = new Map((owned ?? []).map((a) => [a.id as string, a]));
+      mailboxIds = mailboxIds.filter((id) => ownedById.has(id));
+      if (mailboxIds.length === 0) {
         return NextResponse.json(
           { error: "Die gewählte Mailbox wurde nicht gefunden" },
           { status: 400 },
         );
       }
-      if (!replyTo) {
-        replyTo = mailbox.reply_to || mailbox.sender_email || "";
+      if (!replyTo && mailboxIds.length === 1) {
+        const mb = ownedById.get(mailboxIds[0]);
+        replyTo = (mb?.reply_to as string) || (mb?.sender_email as string) || "";
       }
     }
+    const mailboxId = mailboxIds.length === 1 ? mailboxIds[0] : null;
 
     /* Sequence */
     const rawSteps = Array.isArray(body.sequence_steps) ? body.sequence_steps : [];
@@ -183,7 +234,7 @@ export async function POST(request: NextRequest) {
         return { id, intent, desc };
       })
       .filter((x): x is SequenceStep => x !== null)
-      .slice(0, 10);
+      .slice(0, MAX_SEQUENCE_STEPS);
 
     const rawDelays = Array.isArray(body.sequence_delays) ? body.sequence_delays : [];
     const sequence_delays: SequenceDelay[] = rawDelays
@@ -193,7 +244,7 @@ export async function POST(request: NextRequest) {
         return { value, unit: "day" as const };
       })
       .filter((x): x is SequenceDelay => x !== null)
-      .slice(0, 10);
+      .slice(0, Math.max(0, MAX_SEQUENCE_STEPS - 1));
 
     /* Schedule */
     const schedRaw = (body.schedule && typeof body.schedule === "object")
@@ -229,6 +280,7 @@ export async function POST(request: NextRequest) {
       delay_minutes:      delayMinutes,
       reply_to:           replyTo || undefined,
       mailbox_id:         mailboxId,
+      mailbox_ids:        mailboxIds,
       sender_name:        senderName,
       goal,
       language,
@@ -243,7 +295,10 @@ export async function POST(request: NextRequest) {
     };
 
     const campaign = await createCampaign(input, user.id);
-    return NextResponse.json({ data: campaign }, { status: 201 });
+    return NextResponse.json(
+      { data: campaign, skipped_already_contacted: skippedAlreadyContacted },
+      { status: 201 },
+    );
   } catch (err) {
     console.error("[API /api/campaigns POST]", err);
     return NextResponse.json(

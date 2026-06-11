@@ -8,14 +8,6 @@ interface StepReviewProps {
   onJump: (idx: number) => void;
 }
 
-const PROVIDER_LABEL: Record<string, string> = {
-  google: "Google Workspace",
-  google_oauth: "Google Workspace",
-  microsoft_graph: "Microsoft 365",
-  microsoft_oauth: "Microsoft 365",
-  smtp: "SMTP",
-};
-
 const LANGUAGE_LABEL: Record<string, string> = {
   "de-AT": "Deutsch (Österreich)",
   "de-DE": "Deutsch (Deutschland)",
@@ -27,6 +19,7 @@ const DAY_LABEL = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 
 export function StepReview({ state, onJump }: StepReviewProps) {
   const audienceCount = state.audience.selectedLeadIds.size;
+  const mailboxCount = state.mailbox.mailboxIds.length;
   const dayString = state.schedule.days
     .map((on, i) => on ? DAY_LABEL[i] : null)
     .filter(Boolean)
@@ -35,21 +28,23 @@ export function StepReview({ state, onJump }: StepReviewProps) {
 
   const rows: { k: string; v: string; sub?: string; jump: number }[] = [
     {
-      k: "Mailbox",
-      v: state.mailbox.email || "Nicht ausgewählt",
-      sub: state.mailbox.provider ? PROVIDER_LABEL[state.mailbox.provider] : undefined,
+      k: mailboxCount > 1 ? "Mailboxen" : "Mailbox",
+      v: state.mailbox.emails.join(", ") || "Nicht ausgewählt",
+      sub: mailboxCount > 1
+        ? `Automatische Rotation über ${mailboxCount} Konten`
+        : undefined,
       jump: 0,
-    },
-    {
-      k: "Kampagne",
-      v: state.basics.name || "—",
-      sub: LANGUAGE_LABEL[state.basics.language] ?? state.basics.language,
-      jump: 1,
     },
     {
       k: "Empfänger",
       v: `${audienceCount.toLocaleString("de-DE")} Leads`,
       sub: "Bereits kontaktierte automatisch ausgenommen",
+      jump: 1,
+    },
+    {
+      k: "Kampagne",
+      v: state.basics.name || "—",
+      sub: LANGUAGE_LABEL[state.basics.language] ?? state.basics.language,
       jump: 2,
     },
     {
@@ -58,13 +53,13 @@ export function StepReview({ state, onJump }: StepReviewProps) {
       sub: followUps > 0
         ? `Erstkontakt + ${followUps} Follow-up${followUps > 1 ? "s" : ""} · stoppt bei Antwort`
         : "Nur Erstkontakt",
-      jump: 3,
+      jump: 2,
     },
     {
       k: "Sendefenster",
       v: `${dayString} · ${state.schedule.timeFrom} – ${state.schedule.timeTo}`,
       sub: `Max. ${state.schedule.daily} E-Mails / Tag`,
-      jump: 4,
+      jump: 3,
     },
   ];
 

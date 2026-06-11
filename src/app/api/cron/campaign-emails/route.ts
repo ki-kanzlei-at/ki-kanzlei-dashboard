@@ -23,6 +23,7 @@ import {
   type EmailAccount,
 } from "@/lib/supabase/email-accounts";
 import { sendEmailViaAccount } from "@/lib/email/sender";
+import { markLeadContacted } from "@/lib/supabase/lead-status";
 import { recordMessage } from "@/lib/inbox/store";
 import { generateCampaignMail } from "@/lib/email/campaign-generator";
 import { getUserSettingsByUserId } from "@/lib/supabase/settings";
@@ -376,6 +377,9 @@ export async function GET(request: NextRequest) {
             await incrementCampaignCounter(campaign.id, "sent_count");
             totalSent++;
 
+            // Lead-Pipeline nachziehen: Neu → Kontaktiert (upgrade-only)
+            await markLeadContacted(lead.id);
+
             /* Versand klappt wieder → alte Kampagnen-Fehlermeldung
              * ("Credits aufgebraucht", "Keine aktive Mailbox", …) zurücksetzen */
             if (!campaignErrorCleared) {
@@ -533,24 +537,35 @@ async function loadAccountsForCampaign(campaign: Campaign): Promise<EmailAccount
   const admin = getSupabaseAdmin();
   const today = new Date().toISOString().slice(0, 10);
 
-  if (campaign.mailbox_id) {
+  /* Auswahl der Kampagne: mehrere Mailboxen (Rotation) > eine Mailbox >
+   * alle aktiven Konten des Users. pickNextAccount() rotiert least-used-first
+   * und respektiert Warmup-/Tageslimits je Konto. */
+  const mailboxIds = Array.isArray(campaign.mailbox_ids)
+    ? campaign.mailbox_ids.filter(Boolean)
+    : [];
+  const fixedIds = mailboxIds.length > 0
+    ? mailboxIds
+    : campaign.mailbox_id ? [campaign.mailbox_id] : [];
+
+  if (fixedIds.length > 0) {
     const { data } = await admin
       .from("email_accounts")
       .select("*")
-      .eq("id", campaign.mailbox_id)
-      .eq("is_active", true)
-      .maybeSingle();
-    if (!data) return [];
-    const acc = data as EmailAccount;
-    if (acc.sent_today_date !== today) {
-      await admin
-        .from("email_accounts")
-        .update({ sent_today: 0, sent_today_date: today })
-        .eq("id", acc.id);
-      acc.sent_today = 0;
-      acc.sent_today_date = today;
+      .in("id", fixedIds)
+      .eq("user_id", campaign.user_id)
+      .eq("is_active", true);
+    const accounts = (data ?? []) as EmailAccount[];
+    for (const acc of accounts) {
+      if (acc.sent_today_date !== today) {
+        await admin
+          .from("email_accounts")
+          .update({ sent_today: 0, sent_today_date: today })
+          .eq("id", acc.id);
+        acc.sent_today = 0;
+        acc.sent_today_date = today;
+      }
     }
-    return [acc];
+    return accounts;
   }
 
   return getActiveAccountsForUser(campaign.user_id);

@@ -3,7 +3,11 @@
 import { useState } from "react";
 import { Plus, Minus, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { SequenceState } from "./types";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
+import { MAX_SEQUENCE_STEPS } from "@/types/campaigns";
+import type { BasicsState, SequenceState } from "./types";
 
 interface PreviewContext {
   leadId: string | null;
@@ -13,9 +17,23 @@ interface PreviewContext {
 
 interface StepSequenceProps {
   state: SequenceState;
+  basics: BasicsState;
+  onBasicsChange: (next: BasicsState) => void;
   onChange: (next: SequenceState) => void;
   preview: PreviewContext;
 }
+
+const LANGUAGES = [
+  { value: "de-AT", label: "Deutsch (AT)" },
+  { value: "de-DE", label: "Deutsch (DE)" },
+  { value: "de-CH", label: "Deutsch (CH)" },
+  { value: "en",    label: "Englisch" },
+];
+
+const MONTHS = [
+  "Jänner", "Februar", "März", "April", "Mai", "Juni",
+  "Juli", "August", "September", "Oktober", "November", "Dezember",
+];
 
 interface PreviewResult {
   subject: string;
@@ -24,11 +42,20 @@ interface PreviewResult {
   lead?: { company: string | null; ceo_name: string | null; city: string | null; industry: string | null };
 }
 
-export function StepSequence({ state, onChange, preview }: StepSequenceProps) {
+export function StepSequence({
+  state,
+  basics,
+  onBasicsChange,
+  onChange,
+  preview,
+}: StepSequenceProps) {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const canPreview = state.systemPrompt.trim().length >= 20;
+
+  const now = new Date();
+  const namePlaceholder = `z. B. Neukunden ${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
 
   async function generatePreview() {
     if (!canPreview) return;
@@ -58,7 +85,7 @@ export function StepSequence({ state, onChange, preview }: StepSequenceProps) {
   }
 
   function setMailCount(count: number) {
-    const n = Math.max(1, Math.min(5, count));
+    const n = Math.max(1, Math.min(MAX_SEQUENCE_STEPS, count));
     const delayDays = [...state.delayDays];
     while (delayDays.length < n - 1) delayDays.push(delayDays[delayDays.length - 1] ?? 4);
     onChange({ ...state, mailCount: n, delayDays: delayDays.slice(0, Math.max(0, n - 1)) });
@@ -74,12 +101,52 @@ export function StepSequence({ state, onChange, preview }: StepSequenceProps) {
   return (
     <>
       <div className="step-head">
-        <div className="step-eyebrow">Schritt 4 von 5</div>
-        <h1 className="step-heading">Briefing für deine Mails</h1>
+        <div className="step-eyebrow">Schritt 3 von 4</div>
+        <h1 className="step-heading">Name &amp; Briefing</h1>
         <p className="step-desc">
           Wir haben das Briefing aus deinem Firmenprofil vorbereitet — passe es an,
           wo du willst. Jede Mail wird daraus individuell pro Empfänger:in geschrieben.
         </p>
+      </div>
+
+      {/* Name & Sprache */}
+      <div className="wiz-section">
+        <div className="wiz-section-head">
+          <div className="left">
+            <h3>Kampagne</h3>
+            <p>Der Name ist nur intern sichtbar.</p>
+          </div>
+        </div>
+        <div className="wiz-section-body">
+          <div className="space-y-2">
+            <Label htmlFor="campaign-name" className="text-[12px] font-medium text-foreground">
+              Kampagnenname
+            </Label>
+            <Input
+              id="campaign-name"
+              value={basics.name}
+              onChange={(e) => onBasicsChange({ ...basics, name: e.target.value })}
+              placeholder={namePlaceholder}
+              className="input-bright h-10"
+              autoFocus
+            />
+          </div>
+          <div className="space-y-2 mt-4">
+            <Label className="text-[12px] font-medium text-foreground">Sprache der E-Mails</Label>
+            <div className="pill-grid">
+              {LANGUAGES.map((l) => (
+                <button
+                  key={l.value}
+                  type="button"
+                  className={cn("pill-item", basics.language === l.value && "is-on")}
+                  onClick={() => onBasicsChange({ ...basics, language: l.value })}
+                >
+                  {l.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Briefing */}
@@ -91,7 +158,7 @@ export function StepSequence({ state, onChange, preview }: StepSequenceProps) {
           </div>
         </div>
         <textarea
-          className="prompt-area"
+          className="prompt-area input-bright"
           value={state.systemPrompt}
           onChange={(e) => onChange({ ...state, systemPrompt: e.target.value })}
           placeholder="Wer seid ihr, was bietet ihr an, was ist das Ziel der Mail?"
@@ -184,7 +251,7 @@ export function StepSequence({ state, onChange, preview }: StepSequenceProps) {
                 <Minus className="h-3.5 w-3.5" strokeWidth={2} />
               </Button>
               <span className="w-5 text-center text-[15px] font-semibold tabular-nums">{state.mailCount}</span>
-              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setMailCount(state.mailCount + 1)} disabled={state.mailCount >= 5} aria-label="Mehr Mails">
+              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setMailCount(state.mailCount + 1)} disabled={state.mailCount >= MAX_SEQUENCE_STEPS} aria-label="Mehr Mails">
                 <Plus className="h-3.5 w-3.5" strokeWidth={2} />
               </Button>
             </div>
@@ -201,7 +268,7 @@ export function StepSequence({ state, onChange, preview }: StepSequenceProps) {
                     max={30}
                     value={state.delayDays[i] ?? 3}
                     onChange={(e) => updateDelay(i, Number(e.target.value))}
-                    className="h-8 w-16 rounded-md border border-input bg-background px-2 text-center text-[13px] outline-none focus:border-ring focus:ring-[3px] focus:ring-ring/50"
+                    className="input-bright h-8 w-16 rounded-md border border-input px-2 text-center text-[13px] outline-none"
                   />
                   <span className="text-muted-foreground">Tagen, falls keine Antwort kam</span>
                 </div>

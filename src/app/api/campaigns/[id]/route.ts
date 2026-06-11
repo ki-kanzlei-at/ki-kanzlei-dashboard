@@ -11,7 +11,10 @@ import type {
   CampaignStatus,
   CampaignTone,
   CampaignUpdate,
+  SequenceStep,
+  SequenceDelay,
 } from "@/types/campaigns";
+import { MAX_SEQUENCE_STEPS } from "@/types/campaigns";
 
 const VALID_STATUS: CampaignStatus[] = ["draft", "active", "paused", "completed", "archived"];
 const VALID_TONE:  CampaignTone[]    = ["formal", "professional", "casual"];
@@ -94,10 +97,41 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         ? sanitize(body.error_message, 500)
         : null;
     }
-    if (typeof body.mailbox_id === "string" || body.mailbox_id === null) {
+    if (Array.isArray(body.mailbox_ids)) {
+      /* Mehrere Mailboxen (automatische Rotation). Ownership RLS-scoped prüfen. */
+      let mailboxIds = Array.from(new Set(
+        body.mailbox_ids
+          .filter((v): v is string => typeof v === "string" && v.length > 0)
+          .map((v) => sanitize(v, 64))
+          .filter(Boolean),
+      )).slice(0, 20);
+      if (mailboxIds.length > 0) {
+        const { data: owned, error: mbErr } = await supabase
+          .from("email_accounts")
+          .select("id")
+          .in("id", mailboxIds);
+        if (mbErr) {
+          return NextResponse.json(
+            { error: `Mailboxen konnten nicht geprüft werden: ${mbErr.message}` },
+            { status: 500 },
+          );
+        }
+        const ownedIds = new Set((owned ?? []).map((a) => a.id as string));
+        mailboxIds = mailboxIds.filter((mid) => ownedIds.has(mid));
+        if (mailboxIds.length === 0) {
+          return NextResponse.json(
+            { error: "Die gewählten Mailboxen wurden nicht gefunden" },
+            { status: 400 },
+          );
+        }
+      }
+      updates.mailbox_ids = mailboxIds;
+      updates.mailbox_id = mailboxIds.length === 1 ? mailboxIds[0] : null;
+    } else if (typeof body.mailbox_id === "string" || body.mailbox_id === null) {
       updates.mailbox_id = typeof body.mailbox_id === "string"
         ? sanitize(body.mailbox_id, 64)
         : null;
+      updates.mailbox_ids = updates.mailbox_id ? [updates.mailbox_id] : [];
     }
     if (typeof body.sender_name === "string") {
       updates.sender_name = sanitize(body.sender_name, 256);
@@ -115,11 +149,29 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       updates.system_prompt = body.system_prompt.slice(0, 8192);
     }
     if (Array.isArray(body.sequence_steps)) {
-      // Pass-through; DAL berechnet steps_total nach.
-      updates.sequence_steps = body.sequence_steps as CampaignUpdate["sequence_steps"];
+      // Wie beim POST: sanitizen + auf MAX_SEQUENCE_STEPS begrenzen.
+      // DAL berechnet steps_total nach.
+      updates.sequence_steps = body.sequence_steps
+        .map((s, i) => {
+          if (!s || typeof s !== "object") return null;
+          const o = s as Record<string, unknown>;
+          const stepId = typeof o.id === "string" && o.id.length > 0 ? o.id : `s${i + 1}`;
+          const intent = sanitize(o.intent, 128) || `Schritt ${i + 1}`;
+          const desc = sanitize(o.desc, 512);
+          return { id: stepId, intent, desc };
+        })
+        .filter((x): x is SequenceStep => x !== null)
+        .slice(0, MAX_SEQUENCE_STEPS);
     }
     if (Array.isArray(body.sequence_delays)) {
-      updates.sequence_delays = body.sequence_delays as CampaignUpdate["sequence_delays"];
+      updates.sequence_delays = body.sequence_delays
+        .map((d) => {
+          if (!d || typeof d !== "object") return null;
+          const value = clampInt((d as { value?: unknown }).value, 1, 60, 3);
+          return { value, unit: "day" as const };
+        })
+        .filter((x): x is SequenceDelay => x !== null)
+        .slice(0, Math.max(0, MAX_SEQUENCE_STEPS - 1));
     }
     if (body.schedule && typeof body.schedule === "object") {
       updates.schedule = body.schedule as CampaignUpdate["schedule"];

@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import {
   Search,
   Plus,
-  Download,
   X,
   Play,
   Pause,
@@ -14,29 +13,27 @@ import {
   Pencil,
   MoreHorizontal,
   Trash2,
-  Send,
-  Users,
-  Layers,
   AlertTriangle,
-  Flame,
-  TrendingUp,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
-import { Progress } from "@/components/ui/progress";
 import {
-  Empty,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-  EmptyDescription,
-  EmptyContent,
-} from "@/components/ui/empty";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Pagination,
   PaginationContent,
@@ -65,24 +62,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FilterTriggerPopover } from "@/components/shared/FilterTriggerPopover";
+import { EmptyCards } from "@/components/shared/EmptyCards";
 
 import type { Campaign, CampaignStatus } from "@/types/campaigns";
 import { cn } from "@/lib/utils";
-
-/* ── Email Account type (für Warmup-Strip) ── */
-interface EmailAccountSummary {
-  id: string;
-  label: string;
-  sender_email: string;
-  is_active: boolean;
-  warmup_enabled: boolean;
-  warmup_day: number;
-  warmup_start: number;
-  warmup_increment: number;
-  daily_limit: number;
-  sent_today: number;
-  health_status: string;
-}
 
 /* ── Status-Labels ── */
 const STATUS_LABEL: Record<CampaignStatus, string> = {
@@ -163,9 +146,12 @@ function LastActivityCell({
   const label =
     kind === "reply"     ? "Antwort eingegangen"  :
     kind === "open"      ? "Mail geöffnet"        :
+    kind === "click"     ? "Link geklickt"        :
     kind === "send"      ? "Versendet"            :
+    kind === "start"     ? "Gestartet"            :
     kind === "pause"     ? "Pausiert"             :
     kind === "completed" ? "Abgeschlossen"        :
+    kind === "archived"  ? "Archiviert"           :
     kind === "draft"     ? "Entwurf gespeichert"  : "—";
   const isHot = kind === "reply";
   return (
@@ -194,28 +180,6 @@ function buildPageNumbers(current: number, total: number): (number | "…")[] {
   return [1, "…", current - 1, current, current + 1, "…", total];
 }
 
-/* ── CSV-Export der aktuell geladenen Kampagnen ── */
-function exportCsv(campaigns: Campaign[]) {
-  const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const rows = [
-    ["Name", "Status", "Empfänger", "Gesendet", "Geöffnet", "Geklickt", "Antworten", "Bounces", "Erstellt"],
-    ...campaigns.map((c) => [
-      c.name, STATUS_LABEL[c.status], c.total_count, c.sent_count,
-      c.open_count, c.click_count, c.reply_count, c.bounce_count,
-      new Date(c.created_at).toLocaleDateString("de-AT"),
-    ]),
-  ];
-  const csv = rows.map((r) => r.map(esc).join(";")).join("\r\n");
-  // BOM, damit Excel Umlaute korrekt erkennt
-  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `kampagnen-${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
 /* ══════════════════════════════════════════════════════════════
    Hauptkomponente
    ══════════════════════════════════════════════════════════════ */
@@ -227,7 +191,6 @@ export default function CampaignsPage() {
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | CampaignStatus>("all");
   const [rangeFilter,  setRangeFilter]  = useState<string>("all");
-  const [emailAccounts, setEmailAccounts] = useState<EmailAccountSummary[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
@@ -235,18 +198,6 @@ export default function CampaignsPage() {
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [pendingDelete, setPendingDelete] = useState<string[] | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
-
-  /* ── Fetch E-Mail-Accounts (für Warmup-Strip) ── */
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/email-accounts");
-        if (!res.ok) return;
-        const { data } = await res.json();
-        setEmailAccounts(data ?? []);
-      } catch { /* silent */ }
-    })();
-  }, []);
 
   /* ── Fetch Kampagnen (serverseitig paginiert & gefiltert) ── */
   const fetchCampaigns = useCallback(async () => {
@@ -421,76 +372,6 @@ export default function CampaignsPage() {
         </div>
       </div>
 
-      {/* ── Warmup-Strip (vorhandene Funktion, dezent oberhalb Tabs) ── */}
-      {emailAccounts.length > 0 && (
-        <div className="px-4 lg:px-6">
-          <div className="rounded-[var(--radius)] border border-border bg-card px-4 py-3">
-            <div className="flex items-center gap-2 mb-2">
-              <Flame className="h-3.5 w-3.5 text-orange-500" strokeWidth={1.75} />
-              <span className="text-[12.5px] font-medium">E-Mail-Konten & Warmup</span>
-              <span className="text-[11.5px] text-muted-foreground ml-auto">
-                {emailAccounts.filter((a) => a.is_active).length} aktiv · Kapazität:{" "}
-                {emailAccounts.filter((a) => a.is_active).reduce((s, a) => {
-                  if (!a.warmup_enabled) return s + a.daily_limit;
-                  const effective = Math.min(
-                    a.daily_limit,
-                    a.warmup_start + a.warmup_increment * a.warmup_day,
-                  );
-                  return s + effective;
-                }, 0)} E-Mails/Tag
-              </span>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {emailAccounts.filter((a) => a.is_active).map((acc) => {
-                const effectiveLimit = acc.warmup_enabled
-                  ? Math.min(acc.daily_limit, acc.warmup_start + acc.warmup_increment * acc.warmup_day)
-                  : acc.daily_limit;
-                const warmupProgress = acc.warmup_enabled
-                  ? Math.min(100, (effectiveLimit / acc.daily_limit) * 100)
-                  : 100;
-                const daysLeft = acc.warmup_enabled && effectiveLimit < acc.daily_limit
-                  ? Math.ceil((acc.daily_limit - effectiveLimit) / acc.warmup_increment)
-                  : 0;
-                return (
-                  <div key={acc.id} className="flex items-center gap-3 rounded-md border border-border p-2.5">
-                    <span
-                      className={cn(
-                        "size-2 rounded-full shrink-0",
-                        acc.health_status === "good"    ? "bg-green-500" :
-                        acc.health_status === "warning" ? "bg-amber-500" :
-                        acc.health_status === "bad"     ? "bg-red-500"   : "bg-muted-foreground/40",
-                      )}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[12px] font-medium truncate">{acc.label || acc.sender_email}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        {acc.warmup_enabled ? (
-                          <>
-                            <Progress value={warmupProgress} className="h-1 flex-1" />
-                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-normal shrink-0">
-                              {effectiveLimit}/{acc.daily_limit}
-                            </Badge>
-                          </>
-                        ) : (
-                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-normal gap-1">
-                            <TrendingUp className="size-3" /> {acc.daily_limit}/Tag
-                          </Badge>
-                        )}
-                      </div>
-                      {acc.warmup_enabled && daysLeft > 0 && (
-                        <span className="inline-block text-[10px] mt-1 text-orange-600">
-                          Tag {acc.warmup_day} · {daysLeft}d bis Volllast
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ── Status-Tabs ── */}
       <Tabs
         value={statusFilter}
@@ -522,7 +403,7 @@ export default function CampaignsPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60 pointer-events-none" strokeWidth={1.75} />
               <Input
                 placeholder="Kampagne suchen …"
-                className="pl-9 h-8 text-[13px] bg-card"
+                className="input-bright pl-9 h-8 text-[13px]"
                 value={searchFilter}
                 onChange={(e) => setSearchFilter(e.target.value)}
               />
@@ -564,16 +445,6 @@ export default function CampaignsPage() {
                 </b>{" "}
                 Kampagnen
               </span>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 gap-1.5 text-xs font-medium"
-                onClick={() => exportCsv(campaigns)}
-                disabled={campaigns.length === 0}
-              >
-                <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
-                Export
-              </Button>
             </div>
           </div>
 
@@ -585,56 +456,55 @@ export default function CampaignsPage() {
               ))}
             </div>
           ) : campaigns.length === 0 ? (
-            <Empty className="py-20 border-0">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <Send />
-                </EmptyMedia>
-                <EmptyTitle>
-                  {hasFilters ? "Keine Kampagnen gefunden" : "Noch keine Kampagnen"}
-                </EmptyTitle>
-                <EmptyDescription>
-                  {hasFilters
-                    ? "Passe die Filter an oder setze sie zurück."
-                    : "Erstelle deine erste Cold-Email-Kampagne und starte mit dem Outreach."}
-                </EmptyDescription>
-              </EmptyHeader>
-              <EmptyContent>
-                {hasFilters ? (
-                  <Button variant="outline" size="sm" onClick={resetFilters}>
-                    Filter zurücksetzen
-                  </Button>
-                ) : (
-                  <Button onClick={() => router.push("/dashboard/campaigns/new")}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Erste Kampagne erstellen
-                  </Button>
-                )}
-              </EmptyContent>
-            </Empty>
+            hasFilters ? (
+              <EmptyCards
+                variant="search"
+                title="Keine Kampagnen gefunden"
+                description="Passe die Filter an oder setze sie zurück."
+              >
+                <Button variant="outline" size="sm" className="h-8 text-xs font-medium" onClick={resetFilters}>
+                  Filter zurücksetzen
+                </Button>
+              </EmptyCards>
+            ) : (
+              <EmptyCards
+                variant="mail"
+                title="Noch keine Kampagnen"
+                description="Erstelle deine erste Kampagne — die KI personalisiert jede E-Mail automatisch für deine Empfänger."
+              >
+                <Button
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs font-medium"
+                  onClick={() => router.push("/dashboard/campaigns/new")}
+                >
+                  <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  Erste Kampagne erstellen
+                </Button>
+              </EmptyCards>
+            )
           ) : (
             <>
               <div className="overflow-x-auto">
-                <table className="w-full border-collapse">
-                  <thead>
-                    <tr className="border-b border-border bg-card">
-                      <th className="text-left font-medium text-muted-foreground px-4 py-2.5 text-[11.5px] uppercase tracking-wide w-10">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent border-b bg-card">
+                      <TableHead className="h-[42px] px-3.5 text-[11.5px] font-medium text-muted-foreground tracking-wide whitespace-nowrap w-10">
                         <Checkbox
                           checked={allVisibleSelected}
                           onCheckedChange={toggleAll}
                           aria-label="Alle auswählen"
                         />
-                      </th>
-                      <th className="text-left font-medium text-muted-foreground px-4 py-2.5 text-[11.5px] uppercase tracking-wide">Kampagne</th>
-                      <th className="text-left font-medium text-muted-foreground px-4 py-2.5 text-[11.5px] uppercase tracking-wide w-28">Status</th>
-                      <th className="text-left font-medium text-muted-foreground px-4 py-2.5 text-[11.5px] uppercase tracking-wide w-44">Versendet</th>
-                      <th className="text-left font-medium text-muted-foreground px-4 py-2.5 text-[11.5px] uppercase tracking-wide w-28">Öffnungsrate</th>
-                      <th className="text-left font-medium text-muted-foreground px-4 py-2.5 text-[11.5px] uppercase tracking-wide w-28">Antwortrate</th>
-                      <th className="text-left font-medium text-muted-foreground px-4 py-2.5 text-[11.5px] uppercase tracking-wide w-40">Letzte Aktivität</th>
-                      <th className="w-28 pr-3" />
-                    </tr>
-                  </thead>
-                  <tbody>
+                      </TableHead>
+                      <TableHead className="h-[42px] px-3.5 text-[11.5px] font-medium text-muted-foreground tracking-wide whitespace-nowrap">Kampagne</TableHead>
+                      <TableHead className="h-[42px] px-3.5 text-[11.5px] font-medium text-muted-foreground tracking-wide whitespace-nowrap w-28">Status</TableHead>
+                      <TableHead className="h-[42px] px-3.5 text-[11.5px] font-medium text-muted-foreground tracking-wide whitespace-nowrap w-44">Versendet</TableHead>
+                      <TableHead className="h-[42px] px-3.5 text-[11.5px] font-medium text-muted-foreground tracking-wide whitespace-nowrap w-28">Öffnungsrate</TableHead>
+                      <TableHead className="h-[42px] px-3.5 text-[11.5px] font-medium text-muted-foreground tracking-wide whitespace-nowrap w-28">Antwortrate</TableHead>
+                      <TableHead className="h-[42px] px-3.5 text-[11.5px] font-medium text-muted-foreground tracking-wide whitespace-nowrap w-40">Letzte Aktivität</TableHead>
+                      <TableHead className="h-[42px] px-3.5 w-28" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {campaigns.map((c) => {
                       const audience = c.total_count || 0;
                       const sent     = c.sent_count  || 0;
@@ -654,52 +524,56 @@ export default function CampaignsPage() {
                          "draft");
 
                       return (
-                        <tr
+                        <TableRow
                           key={c.id}
                           className={cn(
-                            "border-b border-border last:border-b-0 cursor-pointer transition-colors hover:bg-muted/40",
-                            isSelected && "bg-accent",
+                            "cursor-pointer transition-colors group border-b last:border-b-0",
+                            isSelected ? "bg-accent hover:bg-accent/80" : "hover:bg-muted/40",
                           )}
                           onClick={() => router.push(`/dashboard/campaigns/${c.id}`)}
                         >
-                          <td className="px-4 py-3.5 align-middle" onClick={(e) => e.stopPropagation()}>
+                          <TableCell className="py-3 px-3.5 align-middle text-[13px]" onClick={(e) => e.stopPropagation()}>
                             <Checkbox
+                              className="cursor-pointer"
                               checked={isSelected}
                               onCheckedChange={() => toggleOne(c.id)}
                               aria-label={`${c.name} auswählen`}
                             />
-                          </td>
-                          <td className="px-4 py-3.5 align-middle">
-                            <div className="flex flex-col gap-0">
-                              <div className="co-name">{c.name}</div>
-                              <div className="cmp-meta-row">
+                          </TableCell>
+                          <TableCell className="py-3 px-3.5 align-middle text-[13px]">
+                            <div className="min-w-0">
+                              <p className="text-[13px] font-medium leading-tight text-foreground truncate">
+                                {c.name}
+                              </p>
+                              <p className="text-[11px] text-muted-foreground truncate leading-tight mt-0.5 flex items-center gap-1.5">
                                 <span>
-                                  <Layers className="inline-block h-3 w-3 mr-1 -mt-0.5" strokeWidth={1.75} />
                                   {c.steps ?? 1} {(c.steps ?? 1) === 1 ? "Schritt" : "Schritte"}
                                 </span>
-                                <span className="sep" />
-                                <span>
-                                  <Users className="inline-block h-3 w-3 mr-1 -mt-0.5" strokeWidth={1.75} />
-                                  {audience.toLocaleString("de-DE")} Empfänger
-                                </span>
+                                <span className="inline-block w-[3px] h-[3px] rounded-full bg-muted-foreground/50" />
+                                <span>{audience.toLocaleString("de-DE")} Empfänger</span>
                                 {c.error_message && (
                                   <>
-                                    <span className="sep" />
-                                    <span className="inline-flex items-center gap-1 text-destructive" title={c.error_message}>
-                                      <AlertTriangle className="h-3 w-3" strokeWidth={1.75} />
-                                      Fehler
-                                    </span>
+                                    <span className="inline-block w-[3px] h-[3px] rounded-full bg-muted-foreground/50" />
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <span className="inline-flex items-center gap-1 text-destructive">
+                                          <AlertTriangle className="h-3 w-3" strokeWidth={1.75} />
+                                          Fehler
+                                        </span>
+                                      </TooltipTrigger>
+                                      <TooltipContent>{c.error_message}</TooltipContent>
+                                    </Tooltip>
                                   </>
                                 )}
-                              </div>
+                              </p>
                             </div>
-                          </td>
-                          <td className="px-4 py-3.5 align-middle">
+                          </TableCell>
+                          <TableCell className="py-3 px-3.5 align-middle text-[13px]">
                             <StatusBadge status={c.status} />
-                          </td>
-                          <td className="px-4 py-3.5 align-middle">
+                          </TableCell>
+                          <TableCell className="py-3 px-3.5 align-middle text-[13px]">
                             {sent === 0 ? (
-                              <span className="meta">—</span>
+                              <span className="text-xs text-muted-foreground/50">—</span>
                             ) : (
                               <span className="cmp-progress">
                                 <span className="cmp-progress-track">
@@ -714,87 +588,118 @@ export default function CampaignsPage() {
                                 </span>
                               </span>
                             )}
-                          </td>
-                          <td className="px-4 py-3.5 align-middle">
-                            {sent === 0 ? <span className="meta">—</span> : <RateCell value={openPct} />}
-                          </td>
-                          <td className="px-4 py-3.5 align-middle">
-                            {sent === 0 ? <span className="meta">—</span> : <RateCell value={replyPct} />}
-                          </td>
-                          <td className="px-4 py-3.5 align-middle">
+                          </TableCell>
+                          <TableCell className="py-3 px-3.5 align-middle text-[13px]">
+                            {sent === 0 ? <span className="text-xs text-muted-foreground/50">—</span> : <RateCell value={openPct} />}
+                          </TableCell>
+                          <TableCell className="py-3 px-3.5 align-middle text-[13px]">
+                            {sent === 0 ? <span className="text-xs text-muted-foreground/50">—</span> : <RateCell value={replyPct} />}
+                          </TableCell>
+                          <TableCell className="py-3 px-3.5 align-middle text-[13px]">
                             <LastActivityCell when={lastWhen} kind={lastKind} />
-                          </td>
-                          <td className="px-3 py-3.5 align-middle text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                            <div className="inline-flex items-center gap-0.5">
+                          </TableCell>
+                          <TableCell className="py-3 px-3.5 align-middle text-[13px] text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 has-[[data-state=open]]:opacity-100 transition-opacity">
                               {c.status === "active" ? (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                                  title="Pausieren"
-                                  onClick={() => handleStatusChange(c.id, "paused")}
-                                >
-                                  <Pause className="h-4 w-4" strokeWidth={1.75} />
-                                </Button>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                      onClick={() => handleStatusChange(c.id, "paused")}
+                                    >
+                                      <Pause className="h-3.5 w-3.5" strokeWidth={1.75} />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Pausieren</TooltipContent>
+                                </Tooltip>
                               ) : c.status === "paused" || c.status === "draft" ? (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                                  title="Starten"
-                                  onClick={() => handleStatusChange(c.id, "active")}
-                                >
-                                  <Play className="h-4 w-4" strokeWidth={1.75} />
-                                </Button>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                      onClick={() => handleStatusChange(c.id, "active")}
+                                    >
+                                      <Play className="h-3.5 w-3.5" strokeWidth={1.75} />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Starten</TooltipContent>
+                                </Tooltip>
                               ) : (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                                  title="Duplizieren"
-                                  onClick={() => handleDuplicate(c.id)}
-                                >
-                                  <Copy className="h-4 w-4" strokeWidth={1.75} />
-                                </Button>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                      onClick={() => handleDuplicate(c.id)}
+                                    >
+                                      <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Duplizieren</TooltipContent>
+                                </Tooltip>
                               )}
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                                title="Details öffnen"
-                                onClick={() => router.push(`/dashboard/campaigns/${c.id}`)}
-                              >
-                                <Pencil className="h-4 w-4" strokeWidth={1.75} />
-                              </Button>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                    onClick={() => router.push(`/dashboard/campaigns/${c.id}`)}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Details öffnen</TooltipContent>
+                              </Tooltip>
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
-                                    <MoreHorizontal className="h-4 w-4" strokeWidth={1.75} />
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                  >
+                                    <MoreHorizontal className="h-3.5 w-3.5" />
+                                    <span className="sr-only">Aktionen</span>
                                   </Button>
                                 </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuItem onClick={() => router.push(`/dashboard/campaigns/${c.id}`)}>
+                                <DropdownMenuContent align="end" className="w-44">
+                                  <DropdownMenuItem
+                                    className="text-xs gap-2 cursor-pointer"
+                                    onClick={() => router.push(`/dashboard/campaigns/${c.id}`)}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
                                     Details öffnen
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleDuplicate(c.id)}>
-                                    <Copy className="h-4 w-4 mr-2" /> Duplizieren
+                                  <DropdownMenuItem
+                                    className="text-xs gap-2 cursor-pointer"
+                                    onClick={() => handleDuplicate(c.id)}
+                                  >
+                                    <Copy className="h-3.5 w-3.5" />
+                                    Duplizieren
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem
                                     variant="destructive"
+                                    className="text-xs gap-2 cursor-pointer"
                                     onClick={() => setPendingDelete([c.id])}
                                   >
-                                    <Trash2 className="h-4 w-4 mr-2" /> Löschen
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    Löschen
                                   </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
                             </div>
-                          </td>
-                        </tr>
+                          </TableCell>
+                        </TableRow>
                       );
                     })}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
 
               {/* ── Pagination ── */}

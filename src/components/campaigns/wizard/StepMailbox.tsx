@@ -73,18 +73,30 @@ function HealthDot({ status }: { status: string }) {
   );
 }
 
+/* Skeleton-Anzahl = Konten-Anzahl vom letzten Besuch — verhindert den
+ * Layout-Sprung „3 Platzhalter → 1 Karte" beim Laden. */
+const SKEL_COUNT_KEY = "wiz-mailbox-count";
+
 export function StepMailbox({ state, onChange }: StepMailboxProps) {
   const [accounts, setAccounts] = useState<MailboxOption[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [skelCount, setSkelCount] = useState(1);
 
   useEffect(() => {
+    const n = parseInt(sessionStorage.getItem(SKEL_COUNT_KEY) ?? "", 10);
+    if (Number.isFinite(n) && n > 0) setSkelCount(Math.min(n, 4));
+
     let cancelled = false;
     (async () => {
       try {
         const res = await fetch("/api/email-accounts");
         if (!res.ok) throw new Error();
         const json = await res.json();
-        if (!cancelled) setAccounts(json.data ?? []);
+        if (!cancelled) {
+          const list = (json.data ?? []) as MailboxOption[];
+          setAccounts(list);
+          sessionStorage.setItem(SKEL_COUNT_KEY, String(Math.max(1, list.length)));
+        }
       } catch {
         if (!cancelled) setAccounts([]);
       } finally {
@@ -94,39 +106,56 @@ export function StepMailbox({ state, onChange }: StepMailboxProps) {
     return () => { cancelled = true; };
   }, []);
 
-  function pick(mb: MailboxOption) {
+  /** Mehrfachauswahl: Klick toggelt das Konto. */
+  function toggle(mb: MailboxOption) {
     if (!mb.is_active) return;
+    const ids = state.mailboxIds.includes(mb.id)
+      ? state.mailboxIds.filter((id) => id !== mb.id)
+      : [...state.mailboxIds, mb.id];
+    const picked = (accounts ?? []).filter((a) => ids.includes(a.id));
     onChange({
-      mailboxId: mb.id,
-      email: mb.sender_email,
-      provider: mb.provider,
-      // Absendername & Antwort-Adresse direkt aus dem Konto — werden im Wizard
-      // nicht mehr separat abgefragt (zentral in den E-Mail-Einstellungen gepflegt).
-      senderName: mb.sender_name?.trim() || "",
-      replyTo: mb.reply_to?.trim() || "",
+      mailboxIds: ids,
+      emails: picked.map((a) => a.sender_email),
+      // Absender-Name vom zuerst gewählten Konto (zentral in den
+      // E-Mail-Einstellungen gepflegt).
+      senderName: picked[0]?.sender_name?.trim() || "",
     });
   }
+
+  const selectedCount = state.mailboxIds.length;
 
   return (
     <>
       <div className="step-head">
-        <div className="step-eyebrow">Schritt 1 von 5</div>
-        <h1 className="step-heading">Welche Mailbox versendet?</h1>
+        <div className="step-eyebrow">Schritt 1 von 4</div>
+        <h1 className="step-heading">Wer versendet?</h1>
         <p className="step-desc">
-          Wähle eines deiner verbundenen E-Mail-Konten als Absender.
+          Wähle ein oder mehrere E-Mail-Konten. Bei mehreren verteilt sich der
+          Versand automatisch — je nach Tageslimit, Warmup und Zustand.
         </p>
       </div>
 
       {loading ? (
-        <div className="choice-stack">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-[88px] rounded-[10px]" />
+        <div className="choice-stack skel-defer" aria-hidden>
+          {Array.from({ length: skelCount }).map((_, i) => (
+            <div key={i} className="choice-card pointer-events-none">
+              <Skeleton className="h-11 w-11 flex-none rounded-[10px] bg-muted" />
+              <div className="min-w-0 flex-1 space-y-2">
+                <Skeleton className="h-3.5 w-[55%] max-w-[260px] bg-muted" />
+                <Skeleton className="h-3 w-[35%] max-w-[170px] bg-muted" />
+                <div className="flex items-center gap-3 pt-1">
+                  <Skeleton className="h-3 w-14 bg-muted" />
+                  <Skeleton className="h-[18px] w-32 rounded-full bg-muted" />
+                </div>
+              </div>
+              <Skeleton className="h-[22px] w-[22px] flex-none rounded-full bg-muted" />
+            </div>
           ))}
         </div>
       ) : accounts && accounts.length > 0 ? (
         <div className="choice-stack">
           {accounts.map((mb) => {
-            const selected = state.mailboxId === mb.id;
+            const selected = state.mailboxIds.includes(mb.id);
             const remaining = Math.max(0, mb.daily_limit - mb.sent_today);
             const disabled = !mb.is_active;
             return (
@@ -134,7 +163,7 @@ export function StepMailbox({ state, onChange }: StepMailboxProps) {
                 key={mb.id}
                 type="button"
                 disabled={disabled}
-                onClick={() => pick(mb)}
+                onClick={() => toggle(mb)}
                 className={cn(
                   "choice-card",
                   selected && "is-selected",
@@ -166,6 +195,14 @@ export function StepMailbox({ state, onChange }: StepMailboxProps) {
               </button>
             );
           })}
+
+          {selectedCount > 1 && (
+            <div className="rounded-[10px] border border-primary/20 bg-primary/5 px-4 py-3 text-[12.5px] text-foreground">
+              <b className="font-semibold">Automatische Rotation aktiv</b> — der Versand
+              verteilt sich auf {selectedCount} Mailboxen. Antworten landen beim
+              jeweils sendenden Konto und in deiner Inbox.
+            </div>
+          )}
         </div>
       ) : (
         <div className="choice-card is-disabled" style={{ cursor: "default" }}>
@@ -182,7 +219,7 @@ export function StepMailbox({ state, onChange }: StepMailboxProps) {
       )}
 
       <Link
-        href="/dashboard/settings"
+        href="/dashboard/settings?tab=mailbox"
         className="choice-card"
         style={{ padding: "14px 18px", justifyContent: "flex-start", textDecoration: "none" }}
       >

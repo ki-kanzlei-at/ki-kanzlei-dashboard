@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { STEPS } from "./types";
@@ -10,17 +11,22 @@ interface StepsRailProps {
   onJump: (idx: number) => void;
 }
 
+/** Horizontaler Stepper im Top-Bar des Wizards. */
 export function StepsRail({ current, completed, onJump }: StepsRailProps) {
   return (
-    <aside className="steps-rail">
-      <h2 className="steps-title">Neue Kampagne</h2>
-      <nav className="steps-list" aria-label="Schritte">
-        {STEPS.map((s, idx) => {
-          const isActive = idx === current;
-          const isDone = completed.has(idx) && !isActive;
-          return (
+    <nav className="steps-flow" aria-label="Schritte">
+      {STEPS.map((s, idx) => {
+        const isActive = idx === current;
+        const isDone = completed.has(idx) && !isActive;
+        return (
+          <Fragment key={s.key}>
+            {idx > 0 && (
+              <span
+                className={cn("step-sep", completed.has(idx - 1) && "is-done")}
+                aria-hidden
+              />
+            )}
             <button
-              key={s.key}
               type="button"
               className={cn(
                 "step-item",
@@ -33,14 +39,11 @@ export function StepsRail({ current, completed, onJump }: StepsRailProps) {
               <span className="step-bubble">
                 {isDone ? <Check className="h-3 w-3" strokeWidth={2.5} /> : idx + 1}
               </span>
-              <div className="step-label">
-                <span className="step-name">{s.name}</span>
-                <span className="step-sub">{s.sub}</span>
-              </div>
+              <span className="step-name">{s.name}</span>
             </button>
-          );
-        })}
-      </nav>
-    </aside>
+          </Fragment>
+        );
+      })}
+    </nav>
   );
 }

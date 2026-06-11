@@ -9,6 +9,7 @@ import { markAccountError, type EmailAccount } from "@/lib/supabase/email-accoun
 import { fetchInbound, type InboundEmail } from "@/lib/email/inbound";
 import { recordMessage } from "@/lib/inbox/store";
 import { trackBounce } from "@/lib/supabase/campaigns";
+import { markLeadsInterested } from "@/lib/supabase/lead-status";
 
 export const maxDuration = 120;
 
@@ -121,6 +122,9 @@ export async function GET(request: NextRequest) {
             .eq("user_id", account.user_id)
             .neq("status", "replied")
             .in("lead_id", leadIds);
+          // Lead-Pipeline nachziehen: Neu/Kontaktiert → Interessiert —
+          // auch wenn die Kampagne längst abgeschlossen ist.
+          await markLeadsInterested(leadIds);
         }
       }
     }

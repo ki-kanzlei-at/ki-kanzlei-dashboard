@@ -134,17 +134,26 @@ body {
    Campaigns (v3) — extends Leads v3 design language
    ══════════════════════════════════════════════════════════════ */
 
-/* Campaign status badges (reuse .badge-status base from above) */
-.status-active    { background: color-mix(in oklch, var(--success) 10%, var(--card)); color: color-mix(in oklch, var(--success) 65%, black); border-color: color-mix(in oklch, var(--success) 22%, var(--card)); }
-.status-active    .dot { background: var(--success); }
-.status-paused    { background: color-mix(in oklch, var(--warning) 12%, var(--card)); color: color-mix(in oklch, var(--warning) 55%, black); border-color: color-mix(in oklch, var(--warning) 24%, var(--card)); }
-.status-paused    .dot { background: var(--warning); }
+/* Campaign status badges — KI Kanzlei Brand-Palette (sky/blue/primary/indigo,
+   gleiche Farbwelt wie die Lead-Status-Badges oben) */
+/* Aktiv — primary (Brand-Blau) */
+.status-active    { background: color-mix(in oklch, var(--primary) 10%, var(--card)); color: color-mix(in oklch, var(--primary) 75%, black); border-color: color-mix(in oklch, var(--primary) 25%, var(--card)); }
+.status-active    .dot { background: var(--primary); }
+/* Pausiert — sky (sky-50/sky-700/sky-200) */
+.status-paused    { background: oklch(0.977 0.013 236.62); color: oklch(0.500 0.134 242.749); border-color: oklch(0.901 0.058 230.902); }
+.status-paused    .dot { background: oklch(0.685 0.169 237.323); }
+/* Entwurf — muted */
 .status-draft     { background: var(--muted); color: var(--muted-foreground); border-color: var(--border); }
 .status-draft     .dot { background: var(--muted-foreground); opacity: 0.6; }
-.status-completed { background: color-mix(in oklch, var(--primary) 8%, var(--card)); color: color-mix(in oklch, var(--primary) 80%, black); border-color: color-mix(in oklch, var(--primary) 18%, var(--card)); }
-.status-completed .dot { background: var(--primary); }
+/* Abgeschlossen — indigo (indigo-50/indigo-700/indigo-200) */
+.status-completed { background: oklch(0.962 0.018 272.314); color: oklch(0.457 0.240 277.023); border-color: oklch(0.870 0.065 274.039); }
+.status-completed .dot { background: oklch(0.511 0.262 276.966); }
+/* Archiviert — muted, dezenter */
 .status-archived  { background: var(--muted); color: var(--muted-foreground); border-color: var(--border); }
 .status-archived  .dot { background: var(--muted-foreground); opacity: 0.4; }
+/* Bounce / Fehler (Empfänger-Status auf der Detailseite) — destructive */
+.status-bounced   { background: color-mix(in oklch, var(--destructive) 8%, var(--card)); color: color-mix(in oklch, var(--destructive) 80%, black); border-color: color-mix(in oklch, var(--destructive) 22%, var(--card)); }
+.status-bounced   .dot { background: var(--destructive); }
 
 /* Mini progress (sent X/Y) */
 .cmp-progress { display: inline-flex; align-items: center; gap: 9px; min-width: 110px; }
@@ -158,7 +167,7 @@ body {
 .rate .pct { font-weight: 600; }
 .rate-hi  .pct { color: oklch(0.40 0.15 150); }
 .rate-mid .pct { color: var(--primary); }
-.rate-low .pct { color: oklch(0.45 0.14 75); }
+.rate-low .pct { color: oklch(0.500 0.134 242.749); } /* sky-700, Brand-Palette */
 .rate-vlo .pct { color: var(--muted-foreground); font-weight: 500; }
 .rate .delta { font-size: 11px; color: var(--muted-foreground); font-weight: 400; }
 .rate .delta.up   { color: oklch(0.50 0.16 150); }
@@ -309,6 +318,162 @@ body {
 .timeline-when { font-size: 11.5px; color: var(--muted-foreground); margin-bottom: 2px; }
 .timeline-what { font-size: 13px; color: var(--foreground); font-weight: 500; }
 .timeline-detail { font-size: 12.5px; color: var(--muted-foreground); margin-top: 2px; }
+
+/* ══════════════════════════════════════════════════════════════
+   Campaigns Liste v4 — helle Eingabefelder, Leerzustand
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Helles Eingabefeld (Felder, die ausgefüllt werden sollen) ── */
+.input-bright {
+  background: var(--card) !important;
+  border-color: color-mix(in oklch, var(--border) 55%, var(--muted-foreground)) !important;
+  box-shadow: 0 1px 2px oklch(0.2 0.02 261 / 0.06);
+}
+.input-bright:focus-within,
+.input-bright:focus {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 14%, transparent);
+}
+
+/* ── Sequenz-Flow (Detailseite): Schritt-Karten mit Wartezeit-Verbindern ── */
+.flow-step {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 9px 14px 9px 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  flex: 0 0 auto;
+  max-width: 240px;
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.flow-step:hover {
+  border-color: color-mix(in oklch, var(--primary) 35%, var(--border));
+  box-shadow: 0 1px 3px oklch(0.2 0.02 261 / 0.08);
+}
+.flow-step .num {
+  width: 24px; height: 24px; border-radius: 50%; flex: 0 0 24px;
+  background: var(--accent); color: var(--primary);
+  display: grid; place-items: center;
+  font-size: 11px; font-weight: 600;
+}
+.flow-step .title {
+  display: block;
+  font-size: 12.5px; font-weight: 500; line-height: 1.3;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.flow-step .sub {
+  display: block;
+  font-size: 11px; color: var(--muted-foreground); margin-top: 1px;
+}
+.flow-connector {
+  position: relative;
+  flex: 0 0 64px;
+  height: 38px;
+  display: grid; place-items: center;
+}
+.flow-connector::before {
+  content: "";
+  position: absolute;
+  left: 6px; right: 6px; top: 50%;
+  height: 1px;
+  background: var(--border);
+}
+.flow-connector span {
+  position: relative;
+  background: var(--card);
+  padding: 0 6px;
+  font-size: 10.5px; color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+/* ── Setup-Chips (Detailseite): Mailbox, Sendefenster, Limit … ── */
+.setup-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  background: color-mix(in oklch, var(--muted) 35%, var(--card));
+  font-size: 12px; color: var(--foreground);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color .12s ease;
+}
+.setup-chip:hover { border-color: color-mix(in oklch, var(--border) 40%, var(--muted-foreground)); }
+.setup-chip svg { width: 13px; height: 13px; color: var(--muted-foreground); flex: 0 0 13px; }
+.setup-chip .mut { color: var(--muted-foreground); }
+.setup-chip.is-accent {
+  background: color-mix(in oklch, var(--primary) 7%, var(--card));
+  border-color: color-mix(in oklch, var(--primary) 20%, var(--card));
+}
+.setup-chip.is-accent svg { color: var(--primary); }
+
+/* ── Leerzustand: gefächerte Karten (EmptyCards-Komponente) ── */
+.empty-illu {
+  position: relative;
+  width: 200px; height: 96px;
+}
+.empty-illu .illu-card {
+  position: absolute;
+  inset: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px oklch(0.2 0.02 261 / 0.07);
+}
+.empty-illu .illu-card.back {
+  transform: rotate(-5deg) translate(-14px, 6px) scale(0.94);
+  opacity: 0.55;
+}
+.empty-illu .illu-card.mid {
+  transform: rotate(3deg) translate(12px, 2px) scale(0.97);
+  opacity: 0.75;
+}
+.empty-illu .illu-card.front {
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 16px;
+}
+.empty-illu .avatar {
+  width: 28px; height: 28px; border-radius: 8px; flex: 0 0 28px;
+  background: color-mix(in oklch, var(--primary) 14%, var(--card));
+  border: 1px solid color-mix(in oklch, var(--primary) 22%, var(--card));
+}
+.empty-illu .lens {
+  position: relative;
+  width: 24px; height: 24px; border-radius: 50%; flex: 0 0 24px;
+  border: 2.5px solid color-mix(in oklch, var(--primary) 38%, var(--card));
+  background: color-mix(in oklch, var(--primary) 6%, var(--card));
+  margin-right: 4px;
+}
+.empty-illu .lens::after {
+  content: "";
+  position: absolute;
+  width: 9px; height: 2.5px; border-radius: 99px;
+  background: color-mix(in oklch, var(--primary) 38%, var(--card));
+  right: -7px; bottom: -1px;
+  transform: rotate(45deg);
+}
+.empty-illu .lines {
+  flex: 1; display: flex; flex-direction: column; gap: 7px; min-width: 0;
+}
+.empty-illu .line {
+  display: block; height: 7px; border-radius: 99px;
+  background: var(--muted);
+}
+.empty-illu .pill {
+  font-size: 10px; font-weight: 500; line-height: 1;
+  padding: 4px 8px; border-radius: 99px;
+  background: color-mix(in oklch, var(--primary) 10%, var(--card));
+  color: var(--primary);
+  border: 1px solid color-mix(in oklch, var(--primary) 25%, var(--card));
+  white-space: nowrap;
+}
+.empty-illu .pill.is-muted {
+  background: var(--muted);
+  color: var(--muted-foreground);
+  border-color: var(--border);
+}
 
 /* ══════════════════════════════════════════════════════════════
    LinkedIn (v3) — extends Leads v3 design language
@@ -964,48 +1129,47 @@ body {
    Campaign Setup Wizard (Claude Design v3 — 5-Step Flow)
    ══════════════════════════════════════════════════════════════ */
 
-/* Eigener Scroll-Container exakt unter dem Header (56px): die Rail reicht
- * damit immer bis ganz oben/unten und wird nie abgeschnitten — unabhängig
- * davon, ob die Seite selbst oder ein Eltern-Container scrollt. */
+/* Eigener Scroll-Container exakt unter dem Header (56px) — der Stepper
+ * sitzt als Top-Bar oben, der Inhalt bekommt die volle Breite. */
 .wiz-shell {
-  display: grid;
-  grid-template-columns: 260px 1fr;
+  display: flex; flex-direction: column;
   height: calc(100svh - 56px);
   overflow: hidden;
   background: var(--background);
 }
 
-/* Steps Rail (left) */
-.steps-rail {
+/* Top-Bar: Titel links, Stepper mittig, Aktionen rechts */
+.wiz-top {
+  height: 56px; flex: 0 0 56px;
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 20px;
   background: var(--card);
-  border-right: 1px solid var(--border);
-  padding: 24px 20px;
-  height: 100%;
-  overflow-y: auto;
+  border-bottom: 1px solid var(--border);
 }
-.steps-title {
-  font-size: 16px; font-weight: 600;
-  letter-spacing: -0.015em;
-  margin: 0 0 20px;
+.wiz-top-spacer { flex: 1 1 0; min-width: 0; }
+.wiz-top-actions {
+  flex: 1 1 0; min-width: 0;
+  display: flex; align-items: center; justify-content: flex-end; gap: 6px;
 }
-.steps-list { display: flex; flex-direction: column; gap: 2px; }
+
+/* Horizontaler Stepper */
+.steps-flow { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .step-item {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  font-size: 13.5px;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 5px 12px 5px 6px;
+  border-radius: 99px;
+  font-size: 13px;
   color: var(--muted-foreground);
-  position: relative;
   cursor: pointer;
-  transition: background .12s ease;
-  text-align: left;
-  width: 100%;
+  transition: background .12s ease, color .12s ease;
   background: transparent;
   border: 0;
+  white-space: nowrap;
 }
 .step-item:hover { background: var(--muted); color: var(--foreground); }
-.step-item.is-active { background: var(--accent); color: var(--primary); font-weight: 500; }
+.step-item.is-active { background: var(--accent); color: var(--primary); }
 .step-item.is-done   { color: var(--foreground); }
+.step-name { font-weight: 500; }
 .step-bubble {
   width: 24px; height: 24px; flex: 0 0 24px;
   border-radius: 50%;
@@ -1016,33 +1180,20 @@ body {
   color: var(--muted-foreground);
   transition: all .15s ease;
 }
-.step-item.is-active .step-bubble { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
+.step-item.is-active .step-bubble,
 .step-item.is-done   .step-bubble { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
-.step-label { display: flex; flex-direction: column; flex: 1; line-height: 1.2; gap: 2px; }
-.step-name { font-weight: 500; }
-.step-sub  { font-size: 11.5px; color: var(--muted-foreground); font-weight: 400; }
-.step-item.is-active .step-sub { color: color-mix(in oklch, var(--primary) 70%, black); }
-.step-item:not(:last-child)::after {
-  content: ""; position: absolute;
-  left: 24px; top: 38px; bottom: -2px;
-  width: 1.25px;
+/* Verbindungslinie — primary, sobald der linke Step erledigt ist */
+.step-sep {
+  width: 20px; height: 1.25px; flex: 0 0 20px;
   background: color-mix(in oklch, var(--border) 60%, var(--muted-foreground));
 }
-.step-item.is-done:not(:last-child)::after { background: var(--primary); }
+.step-sep.is-done { background: var(--primary); }
 
 /* Wizard main column — eigener Scrollbereich, Footer klebt unten */
 .wiz-main {
   display: flex; flex-direction: column; min-width: 0;
-  height: 100%;
+  flex: 1; min-height: 0;
   overflow-y: auto;
-}
-.wiz-topbar {
-  height: 48px; flex: 0 0 48px;
-  display: flex; align-items: center; gap: 8px;
-  padding: 0 28px;
-  border-bottom: 1px solid var(--border);
-  background: var(--background);
-  position: sticky; top: 0; z-index: 9;
 }
 .wiz-body {
   flex: 1;
@@ -1051,8 +1202,9 @@ body {
   width: 100%;
   margin: 0 auto;
 }
-/* Breite Steps (Zielgruppe): Tabelle braucht Platz */
-.wiz-body--wide { max-width: 1080px; }
+/* Breite Steps (Zielgruppe): Tabelle braucht Platz — ohne linke Rail
+ * darf sie deutlich breiter laufen */
+.wiz-body--wide { max-width: 1240px; }
 /* Kurze Steps (Mailbox) vertikal mittig — wirkt aufgeräumter. */
 .wiz-body--center {
   display: flex;
@@ -1112,6 +1264,10 @@ body {
 
 /* Choice cards (mailbox provider/connected mailbox) */
 .choice-stack { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+/* Skeletons erst nach kurzer Latenz einblenden — bei schnellen Antworten
+ * (<150ms) blitzt sonst für einen Frame ein Platzhalter auf. */
+.skel-defer { opacity: 0; animation: skel-defer-in .2s ease .15s forwards; }
+@keyframes skel-defer-in { to { opacity: 1; } }
 .choice-card {
   position: relative;
   display: flex; align-items: center; gap: 18px;
@@ -1123,9 +1279,12 @@ body {
   transition: border-color .12s ease, background .12s ease;
   text-align: left; width: 100%;
 }
-.choice-card:hover {
-  border-color: color-mix(in oklch, var(--border) 50%, var(--muted-foreground));
-  background: color-mix(in oklch, var(--muted) 30%, var(--card));
+.choice-card:hover:not(.is-disabled):not(.is-selected) {
+  border-color: color-mix(in oklch, var(--primary) 30%, var(--border));
+  background: color-mix(in oklch, var(--primary) 3%, var(--card));
+}
+.choice-card:hover:not(.is-disabled) .choice-check {
+  border-color: color-mix(in oklch, var(--primary) 45%, var(--border));
 }
 .choice-card.is-selected {
   border-color: var(--primary);
@@ -1512,36 +1671,21 @@ body {
   font-size: 11.5px; color: var(--muted-foreground);
 }
 .health-dot .dot { width: 6px; height: 6px; border-radius: 50%; }
-.health-dot.is-healthy .dot { background: var(--success); }
-.health-dot.is-warming .dot { background: var(--warning); }
+/* Brand-Palette statt Ampelfarben (siehe Leads-Badges) */
+.health-dot.is-healthy .dot { background: var(--primary); }
+.health-dot.is-warming .dot { background: oklch(0.685 0.169 237.323); } /* sky-500 */
 .health-dot.is-paused  .dot { background: var(--muted-foreground); }
 
 /* Responsive */
 @media (max-width: 1100px) {
-  .wiz-shell { grid-template-columns: 240px 1fr; }
   .wiz-body { padding: 40px 32px 96px; }
   .wiz-foot { padding: 12px 32px; }
 }
-/* Schmal: Rail wird zum kompakten horizontalen Stepper oben */
+/* Schmal: Stepper kompakt — nur der aktive Step zeigt seinen Namen */
 @media (max-width: 900px) {
-  .wiz-shell {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
-  }
-  .steps-rail {
-    height: auto;
-    padding: 10px 16px;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-    overflow-x: auto;
-    overflow-y: hidden;
-  }
-  .steps-title { display: none; }
-  .steps-list { flex-direction: row; gap: 4px; }
-  .step-item { padding: 6px 10px; white-space: nowrap; width: auto; }
-  .step-item:not(:last-child)::after { display: none; }
-  .step-sub { display: none; }
+  .wiz-top { padding: 0 12px; gap: 8px; }
   .step-item:not(.is-active) .step-name { display: none; }
+  .step-sep { width: 10px; flex-basis: 10px; }
   .wiz-body { padding: 28px 16px 80px; }
   .wiz-foot { padding: 10px 16px; }
   .wiz-foot-progress { display: none; }

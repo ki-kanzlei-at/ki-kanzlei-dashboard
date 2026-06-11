@@ -6,6 +6,7 @@
 
 import { createClient } from "./server";
 import { getSupabaseAdmin } from "./admin";
+import { markLeadsInterested } from "./lead-status";
 import type {
   Campaign,
   CampaignInsert,
@@ -157,6 +158,7 @@ export async function createCampaign(
       delay_minutes:      input.delay_minutes ?? 8,
       reply_to:           input.reply_to     ?? "",
       mailbox_id:         input.mailbox_id   ?? null,
+      mailbox_ids:        input.mailbox_ids  ?? [],
       sender_name:        input.sender_name  ?? null,
       goal:               input.goal         ?? null,
       language:           input.language     ?? "de-AT",
@@ -233,6 +235,20 @@ export async function updateCampaign(
     updatePayload.completed_at = null;
   } else if (data.status === "completed") {
     updatePayload.completed_at = new Date().toISOString();
+  }
+
+  // Jeder Statuswechsel stempelt die letzte Aktivität (Liste: „Letzte Aktivität").
+  // Send/Open/Reply/Click stempeln separat über die Counter-RPCs in der DB.
+  if (data.status) {
+    const ACTIVITY_BY_STATUS: Record<CampaignStatus, Campaign["last_activity_kind"]> = {
+      active:    "start",
+      paused:    "pause",
+      completed: "completed",
+      draft:     "draft",
+      archived:  "archived",
+    };
+    updatePayload.last_activity_at = new Date().toISOString();
+    updatePayload.last_activity_kind = ACTIVITY_BY_STATUS[data.status];
   }
   if (data.sequence_steps) {
     updatePayload.steps_total = data.sequence_steps.length;
@@ -319,6 +335,7 @@ export async function duplicateCampaign(
       delay_minutes:      source.delay_minutes,
       reply_to:           source.reply_to || undefined,
       mailbox_id:         source.mailbox_id,
+      mailbox_ids:        source.mailbox_ids,
       sender_name:        source.sender_name,
       goal:               source.goal,
       language:           source.language,
@@ -580,7 +597,7 @@ export async function trackReply(
 
   const { data: cl } = await admin
     .from("campaign_leads")
-    .select("id, campaign_id")
+    .select("id, campaign_id, lead_id")
     .in("lead_id", leadIds)
     .in("status", ["sent", "opened"])
     .order("created_at", { ascending: false })
@@ -600,6 +617,9 @@ export async function trackReply(
     .eq("id", cl.id);
 
   await incrementCampaignCounter(cl.campaign_id, "reply_count");
+
+  // Lead-Pipeline nachziehen: Neu/Kontaktiert → Interessiert (upgrade-only)
+  await markLeadsInterested([cl.lead_id as string]);
 
   return true;
 }
@@ -655,6 +675,7 @@ function normalizeCampaign(raw: Record<string, unknown>): Campaign {
     completed_at:    (raw.completed_at   as string | null) ?? null,
     error_message:   (raw.error_message  as string | null) ?? null,
     mailbox_id:      (raw.mailbox_id     as string | null) ?? null,
+    mailbox_ids:     Array.isArray(raw.mailbox_ids) ? (raw.mailbox_ids as string[]) : [],
     sender_name:     (raw.sender_name    as string | null) ?? null,
     goal:            (raw.goal           as string | null) ?? null,
     language:        (raw.language       as string) ?? "de-AT",
